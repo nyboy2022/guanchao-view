@@ -119,6 +119,7 @@
       return out;
     },
     async validateSymbol(symbol) {
+      if (useTr()) { try { return !!(await trQuotes([symbol]))[symbol]; } catch (_) { return false; } }
       try { const j = await getJSON(`${OKX_REST}/ticker?instId=${symbol}`); return j.code === '0' && j.data.length > 0; }
       catch (_) { return false; }
     },
@@ -247,6 +248,7 @@
     if (m < RTH_CLOSE) return 'rth';
     return 'post';
   }
+  const endTimeIsPast = (end) => Date.now() - end > 60e3;
   const SIP_DELAY = 16 * 60e3; // 免费账号可以免费查 15 分钟以前的全市场（SIP）数据
   const toBarA = (b) => ({ t: parseTs(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
 
@@ -284,12 +286,167 @@
     try { localStorage.setItem(ck, JSON.stringify({ at: Date.now(), ev })); } catch (_) {}
     return ev;
   }
+
+  // =====================================================================
+  // 美股实时（可选）：Tradier 券商 API
+  //   Tradier 证券账户自带全市场实时行情（所有交易所合并），不另收费。浏览器可直接访问（支持 CORS）。
+  //   填了 Tradier Token 后：实时推送、最近 15 分钟的K线、最新价都改用 Tradier；
+  //   更早的历史K线、分红拆股仍用 Alpaca（如果也填了 Alpaca Key），没填就全部用 Tradier。
+  // =====================================================================
+  const TR_REST = 'https://api.tradier.com/v1';
+  const trCfg = { token: '' };
+  const trHeaders = () => ({ Authorization: 'Bearer ' + trCfg.token, Accept: 'application/json' });
+  const asArr = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]); // Tradier 只有一项时返回对象而不是数组
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function etStamp(ms) { // Tradier 的时间参数用美东时间 "YYYY-MM-DD HH:MM"
+    const o = {}; for (const p of etFmt.formatToParts(new Date(ms))) o[p.type] = p.value;
+    return `${o.year}-${o.month}-${o.day} ${pad2(+o.hour % 24)}:${o.minute}`;
+  }
+  function etMidnight(ymd) { // 美东某天 00:00 对应的时间戳（和 Alpaca 日线的时间一致）
+    const [y, m, d] = ymd.split('-').map(Number);
+    for (const h of [4, 5]) { const t = Date.UTC(y, m - 1, d, h); if (etInfo(t).min === 0) return t; }
+    return Date.UTC(y, m - 1, d, 5);
+  }
+  async function trQuotes(symbols) {
+    const out = {};
+    for (let i = 0; i < symbols.length; i += 100) {
+      const part = symbols.slice(i, i + 100);
+      const j = await getJSON(`${TR_REST}/markets/quotes?symbols=${part.map(encodeURIComponent).join(',')}`, trHeaders());
+      for (const q of asArr(j && j.quotes && j.quotes.quote)) if (q && q.symbol) out[q.symbol] = q;
+    }
+    return out;
+  }
+  // 分钟K线（timesales）。可查范围：1分钟约 20 天、5/15 分钟约 40 天（含盘前盘后时更短）
+  const TR_TS_DAYS = { '1min': [19, 9], '5min': [39, 17], '15min': [39, 17] };
+  async function trTimesales(symbol, tsInt, startMs, endMs, withExt) {
+    const days = TR_TS_DAYS[tsInt][withExt ? 1 : 0];
+    startMs = Math.max(startMs, Date.now() - days * 86400e3);
+    if (startMs >= endMs) return [];
+    const q = new URLSearchParams({ symbol, interval: tsInt, start: etStamp(startMs), end: etStamp(endMs + 60e3), session_filter: withExt ? 'all' : 'open' });
+    const j = await getJSON(`${TR_REST}/markets/timesales?${q}`, trHeaders());
+    const rows = asArr(j && j.series && j.series.data);
+    return rows.map((r) => {
+      let t = +r.timestamp; if (t && t < 1e12) t *= 1000;
+      if (!t) return null;
+      return { t, o: +r.open, h: +r.high, l: +r.low, c: +r.close, v: +r.volume || 0 };
+    }).filter((b) => b && b.t >= startMs - 15 * 60e3 && b.t <= endMs && isFinite(b.c));
+  }
+  async function trHistory(symbol, interval, startMs, endMs) {
+    const q = new URLSearchParams({ symbol, interval: { '1d': 'daily', '1w': 'weekly', '1M': 'monthly' }[interval],
+      start: etInfo(startMs).date, end: etInfo(endMs).date });
+    const j = await getJSON(`${TR_REST}/markets/history?${q}`, trHeaders());
+    return asArr(j && j.history && j.history.day).filter((d) => d && d.date)
+      .map((d) => ({ t: etMidnight(d.date), o: +d.open, h: +d.high, l: +d.low, c: +d.close, v: +d.volume || 0 }));
+  }
+  // 把小周期K线（或逐笔成交）按大周期合成；和实时合成用同一套时间网格
+  function makeAgg(interval, last) {
+    const ms = INTERVAL_MS[interval];
+    let cur = last ? { ...last } : null;
+    return (t, o, h, l, c, v) => {
+      let isNew = false;
+      if (!cur) { cur = { t: ms >= 86400e3 ? t : Math.floor(t / ms) * ms, o, h, l, c, v: 0 }; isNew = true; }
+      else if (t < cur.t) return null;
+      else if (interval === '1M') {
+        const a = etInfo(t).date.slice(0, 7), b = etInfo(cur.t + 86400e3).date.slice(0, 7);
+        if (a !== b) { cur = { t, o, h, l, c, v: 0 }; isNew = true; }
+      } else if (t >= cur.t + ms) {
+        cur = { t: cur.t + Math.floor((t - cur.t) / ms) * ms, o, h, l, c, v: 0 }; isNew = true;
+      }
+      cur.h = Math.max(cur.h, h); cur.l = Math.min(cur.l, l); cur.c = c; cur.v += v;
+      return { bar: { ...cur }, isNew };
+    };
+  }
+  // 把较新的分钟K线接到已有K线后面
+  function appendTail(bars, tail, interval) {
+    if (!tail.length) return bars;
+    const lastT = bars.length ? bars[bars.length - 1].t : 0;
+    const agg = makeAgg(interval, bars.length ? bars[bars.length - 1] : null);
+    const out = bars.slice();
+    for (const b of tail) {
+      if (b.t < lastT && INTERVAL_MS[interval] < 86400e3) continue;
+      const r = agg(b.t, b.o, b.h, b.l, b.c, b.v); if (!r) continue;
+      if (r.isNew || !out.length) out.push(r.bar); else out[out.length - 1] = r.bar;
+    }
+    return out;
+  }
+  // 小周期合成大周期（只有 Tradier 时用：30分 / 1时 / 4时 由 15 分钟K线合成）
+  function aggregate(small, interval) {
+    const agg = makeAgg(interval, null), out = [];
+    for (const b of small) { const r = agg(b.t, b.o, b.h, b.l, b.c, b.v); if (!r) continue; if (r.isNew) out.push(r.bar); else out[out.length - 1] = r.bar; }
+    return out;
+  }
+  // Tradier 实时推送：先用 REST 建一个 session，再连 WebSocket。同一账户同时只能有一个 session
+  const trStream = {
+    ws: null, sessionid: '', listeners: new Set(), statusCbs: new Set(), status: 'idle', retry: 0, gen: 0,
+    setStatus(s) { this.status = s; this.statusCbs.forEach((f) => f(s)); },
+    wanted() { const w = new Set(); this.listeners.forEach((l) => l.symbols.forEach((s) => w.add(s))); return w; },
+    close() { this.gen++; clearTimeout(this.timer); if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch (_) {} } this.sessionid = ''; },
+    sync() {
+      if (this.paused || !trCfg.token) { this.close(); return; }
+      const want = this.wanted();
+      clearTimeout(this.idleTimer);
+      if (!want.size) {
+        this.idleTimer = setTimeout(() => { if (!this.wanted().size) { this.close(); this.status = 'idle'; } }, 5000);
+        return;
+      }
+      if (!this.ws) { this.open(); return; }
+      if (this.ws.readyState === 1) this.sendSubs();
+    },
+    sendSubs() {
+      const want = [...this.wanted()];
+      if (want.length) this.ws.send(JSON.stringify({ symbols: want, sessionid: this.sessionid, filter: ['trade'], linebreak: true, validOnly: true }));
+    },
+    async open() {
+      const gen = ++this.gen;
+      this.setStatus('connecting');
+      let sid = '';
+      try {
+        const r = await fetch(`${TR_REST}/markets/events/session`, { method: 'POST', headers: trHeaders() });
+        if (r.status === 401 || r.status === 403) { if (gen === this.gen) this.setStatus('autherr'); return; }
+        const j = await r.json(); sid = j && j.stream && j.stream.sessionid;
+      } catch (_) {}
+      if (gen !== this.gen) return;
+      if (!sid) { this.reconnect(gen); return; }
+      this.sessionid = sid;
+      const ws = new WebSocket('wss://ws.tradier.com/v1/markets/events'); this.ws = ws;
+      ws.onopen = () => { if (gen !== this.gen) return; this.retry = 0; this.setStatus('live'); this.sendSubs(); };
+      ws.onmessage = (ev) => {
+        for (const line of String(ev.data).split('\n')) {
+          if (!line.trim()) continue;
+          let m; try { m = JSON.parse(line); } catch (_) { continue; }
+          if (m.error) { try { ws.close(); } catch (_) {} return; } // 如 Session not found：重新建 session
+          if (m.type !== 'trade' || !m.symbol) continue;
+          const tr = { sym: m.symbol, p: +m.price, s: +m.size || 0, t: +m.date || Date.now() };
+          if (!isFinite(tr.p) || tr.p <= 0) continue;
+          this.listeners.forEach((l) => l.symbols.has(tr.sym) && l.fn(tr));
+        }
+      };
+      ws.onclose = () => { if (gen !== this.gen || this.ws !== ws) return; this.ws = null; this.reconnect(gen); };
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    },
+    reconnect(gen) {
+      if (gen !== this.gen) return;
+      this.setStatus('reconnecting');
+      this.timer = setTimeout(() => { if (gen === this.gen && !this.ws) this.open(); }, Math.min(30e3, 1000 * 2 ** this.retry++));
+    },
+    add(symbols, fn, statusCb) {
+      const l = { symbols: new Set(symbols), fn };
+      this.listeners.add(l); if (statusCb) { this.statusCbs.add(statusCb); statusCb(this.status === 'idle' ? 'connecting' : this.status); }
+      this.sync();
+      return () => { this.listeners.delete(l); if (statusCb) this.statusCbs.delete(statusCb); this.sync(); };
+    },
+    restart() { this.close(); this.sync(); },
+  };
+  const useTr = () => !!trCfg.token;
+  const liveStream = () => (useTr() ? trStream : alpStream);
+
   let nightOk = null; // 免费账号能否读夜盘数据（第一次被拒后不再请求）
   let sipHistoryOk = true; // 免费账号查延迟 SIP 是否被允许（第一次失败后就不再尝试）
 
   const AlpacaFeed = {
     id: 'alpaca', market: 'us',
     get label() {
+      if (useTr()) return this.hasAlp() ? 'Tradier 全市场实时 + Alpaca 历史K线' : 'Tradier 全市场实时';
       return alpCfg.feed === 'sip' ? 'Alpaca · 全美市场 SIP 实时'
         : 'Alpaca 免费版 · 历史K线用全市场数据（延迟15分钟以上的部分），最近15分钟和实时推送来自 IEX';
     },
@@ -298,18 +455,36 @@
       const changed = cfg.feed !== alpCfg.feed || cfg.key !== alpCfg.key || cfg.secret !== alpCfg.secret;
       Object.assign(alpCfg, cfg);
       if (changed) { sipHistoryOk = true; alpStream.restart(); }
+      const tok = (cfg.tradier || '').trim();
+      if (tok !== trCfg.token) {
+        trCfg.token = tok;
+        alpStream.restart(); trStream.restart(); // 切换实时来源
+      }
     },
+    usingTradier() { return useTr(); },
+    // 设置里的「测试」按钮：用填的 Token 查一次 AAPL 报价和今天的分钟K线
+    async testTradier(token) {
+      const old = trCfg.token; trCfg.token = token;
+      try {
+        const q = (await trQuotes(['AAPL'])).AAPL;
+        if (!q) return { ok: false, msg: '连上了，但没拿到报价' };
+        let n = 0; try { n = (await trTimesales('AAPL', '1min', Date.now() - 4 * 86400e3, Date.now(), true)).length; } catch (_) {}
+        return { ok: true, last: +q.last, t: +q.trade_date || 0, bars: n };
+      } catch (e) { return { ok: false, msg: e.kind === 'auth' ? 'Token 被拒绝（要用正式环境 Production 的 Token）' : e.kind === 'network' ? '连不上 Tradier' : e.message }; }
+      finally { trCfg.token = old; }
+    },
+    hasAlp() { return !!(alpCfg.key && alpCfg.secret); },
     setRthOnly(v) { alpCfg.rthOnly = !!v; },
-    hasKey() { return !!(alpCfg.key && alpCfg.secret); },
+    hasKey() { return this.hasAlp() || useTr(); },
     // 图上最新价是不是延迟 15 分钟的数据：免费版开着盘前盘后时，IEX 只在 08:00–17:00 有成交，
     // 04:00–08:00 和 17:00–20:00 图上最新的K线只能来自延迟的全市场数据
     chartDelayed() {
-      if (alpCfg.feed === 'sip' || !sipHistoryOk || alpCfg.rthOnly || !this.hasKey()) return false;
+      if (useTr() || alpCfg.feed === 'sip' || !sipHistoryOk || alpCfg.rthOnly || !this.hasAlp()) return false;
       const now = Date.now(), ses = etSession(now), m = etInfo(now).min;
       return (ses === 'pre' && m < 480) || (ses === 'post' && m >= 1020);
     },
-    pause() { if (alpStream.paused) return; alpStream.paused = true; alpStream.sync(); },
-    resume() { if (!alpStream.paused) return; alpStream.paused = false; alpStream.sync(); },
+    pause() { for (const st of [alpStream, trStream]) { if (st.paused) continue; st.paused = true; st.sync(); } },
+    resume() { for (const st of [alpStream, trStream]) { if (!st.paused) continue; st.paused = false; st.sync(); } },
     normalizeSymbol(s) { return s.trim().toUpperCase().replace(/[^A-Z.]/g, ''); },
     async loadHistory(symbol, interval, endTime) {
       if (!this.hasKey()) throw new FeedError('未设置 API Key', 'auth');
@@ -319,7 +494,20 @@
       // 往前取足够长的时间窗（含休市、周末），再按倒序取最近 1000 根
       const span = ms * 1000 * (ms < 86400e3 ? (alpCfg.rthOnly ? 8 : 4) : 1.6) + 10 * 86400e3;
       let bars;
-      if (alpCfg.feed === 'sip') {
+      if (useTr() && (!this.hasAlp() || (alpCfg.feed !== 'sip' && !sipHistoryOk))) {
+        bars = await this.trLoadHistory(symbol, interval, end, span);
+      } else if (useTr() && alpCfg.feed !== 'sip') {
+        // Alpaca 全市场历史（15 分钟以前）+ Tradier 实时的最近一段
+        const sipEnd = Math.min(end, now - SIP_DELAY);
+        try { bars = await alpBars(symbol, interval, end - span, sipEnd, 'sip'); }
+        catch (e) { if (e.kind === 'auth') { sipHistoryOk = false; bars = await this.trLoadHistory(symbol, interval, end, span); } else throw e; }
+        if (end > sipEnd && sipHistoryOk) {
+          const lastT = bars.length ? bars[bars.length - 1].t : sipEnd;
+          let tail = [];
+          try { tail = await trTimesales(symbol, '1min', Math.min(lastT, sipEnd) - 60e3, end, true); } catch (_) {}
+          bars = appendTail(bars, tail.filter((b) => b.t >= Math.floor(sipEnd / 60e3) * 60e3 && (!alpCfg.rthOnly || tradeInRth(b.t))), interval);
+        }
+      } else if (alpCfg.feed === 'sip') {
         bars = await alpBars(symbol, interval, end - span, end, 'sip');
       } else {
         // 免费账号：15 分钟以前的部分用全市场 SIP 数据（和券商、主流看盘软件一致），最近 15 分钟只能用 IEX 补上
@@ -345,11 +533,61 @@
       if (alpCfg.rthOnly) bars = bars.filter((b) => barInRth(b.t, ms));
       return bars;
     },
+    // 只有 Tradier：日线以上用 history，日内用 timesales（可查的天数有限）
+    async trLoadHistory(symbol, interval, end, span) {
+      const ms = INTERVAL_MS[interval], now = Date.now();
+      if (ms >= 86400e3) {
+        let bars = await trHistory(symbol, interval, end - span, end);
+        if (interval === '1d' && !endTimeIsPast(end)) {
+          // 今天的K线：用今天的 1 分钟数据补上
+          let today = [];
+          try { today = await trTimesales(symbol, '1min', now - 20 * 3600e3, now, false); } catch (_) {}
+          const todayDate = etInfo(now).date;
+          today = today.filter((b) => etInfo(b.t).date === todayDate);
+          if (today.length) {
+            if (bars.length && etInfo(bars[bars.length - 1].t).date === todayDate) bars = bars.slice(0, -1);
+            bars = appendTail(bars, today, interval);
+          }
+        }
+        return bars;
+      }
+      const ext = !alpCfg.rthOnly;
+      const tsInt = interval === '1m' ? '1min' : interval === '5m' ? '5min' : '15min';
+      const small = await trTimesales(symbol, tsInt, end - span, end, ext);
+      return tsInt === { '1m': '1min', '5m': '5min', '15m': '15min' }[interval] ? small : aggregate(small, interval);
+    },
     // 自选列表的价格：
     //  - 收盘价/昨收用全市场 SIP 日线（免费账号可查 15 分钟以前的），和主流看盘软件一致
     //  - 交易时段内如果 IEX 有最近 20 分钟内的成交，用 IEX 实时价
     async fetchTickers(symbols) {
       if (!symbols.length || !this.hasKey()) return {};
+      if (useTr()) return this.trFetchTickers(symbols);
+      return this.alpFetchTickers(symbols);
+    },
+    // 有 Tradier 时：常规时段用 Tradier 的实时最新价；收盘价和昨收仍优先用 Alpaca 的全市场日线（更准）
+    async trFetchTickers(symbols) {
+      const now = Date.now(), ses = etSession(now);
+      let base = {};
+      if (this.hasAlp()) { try { base = await this.alpFetchTickers(symbols, true); } catch (_) {} }
+      let qs = {};
+      try { qs = await trQuotes(symbols); } catch (e) { if (!Object.keys(base).length) throw e; }
+      const today = etInfo(now).date, out = { ...base };
+      for (const sym of symbols) {
+        const q = qs[sym]; if (!q) continue;
+        const last = +q.last, tt = +q.trade_date || 0;
+        if (q.prevclose != null && (!this.hasAlp() || !prevClose[sym])) prevClose[sym] = +q.prevclose;
+        const pc = prevClose[sym] || +q.prevclose || null;
+        if (ses === 'rth' && isFinite(last) && last > 0 && (!tt || tradeInRth(tt)) && (!tt || etInfo(tt).date === today)) {
+          out[sym] = { last, changePct: pc ? ((last - pc) / pc) * 100 : 0 };
+        } else if (!out[sym] && isFinite(last) && last > 0) {
+          // 只有 Tradier：非交易时段用 Tradier 给的价格和涨跌幅
+          const cp = q.change_percentage != null ? +q.change_percentage : (pc ? ((last - pc) / pc) * 100 : 0);
+          out[sym] = { last, changePct: cp };
+        }
+      }
+      return out;
+    },
+    async alpFetchTickers(symbols, skipSnap) {
       const out = {}, now = Date.now();
       const daily = {};
       try {
@@ -359,7 +597,7 @@
         for (const [sym, arr] of Object.entries(j.bars || {})) daily[sym] = arr.map(toBarA);
       } catch (_) {}
       let snaps = {};
-      try { snaps = await getJSON(`${ALP_REST}/snapshots?symbols=${symbols.map(encodeURIComponent).join(',')}&feed=${alpCfg.feed}`, alpHeaders()) || {}; } catch (_) {}
+      if (!skipSnap) try { snaps = await getJSON(`${ALP_REST}/snapshots?symbols=${symbols.map(encodeURIComponent).join(',')}&feed=${alpCfg.feed}`, alpHeaders()) || {}; } catch (_) {}
       const today = etInfo(now).date;
       for (const sym of symbols) {
         const d = daily[sym] || [], s = snaps[sym];
@@ -394,7 +632,7 @@
       if (!symbols.length || !this.hasKey() || session === 'rth') return out;
       const feed = alpCfg.feed === 'sip' ? 'sip' : (sipHistoryOk ? 'sip' : 'iex');
       const bars = {};
-      try {
+      if (this.hasAlp()) try {
         let token = null, pages = 0;
         do {
           const q = new URLSearchParams({ symbols: symbols.join(','), timeframe: '5Min', feed, limit: '10000',
@@ -406,7 +644,10 @@
         } while (token && ++pages < 10);
       } catch (_) {}
       let snaps = {};
-      try { snaps = await getJSON(`${ALP_REST}/snapshots?symbols=${symbols.map(encodeURIComponent).join(',')}&feed=${alpCfg.feed}`, alpHeaders()) || {}; } catch (_) {}
+      if (useTr()) {
+        // Tradier 最新成交（实时、全市场）当作 snapshot 用
+        try { const qs = await trQuotes(symbols); for (const [k, q] of Object.entries(qs)) if (+q.trade_date && +q.last > 0) snaps[k] = { latestTrade: { t: new Date(+q.trade_date).toISOString(), p: +q.last }, trRef: +q.prevclose || null, trClose: q.close != null ? +q.close : null }; } catch (_) {}
+      } else if (this.hasAlp()) try { snaps = await getJSON(`${ALP_REST}/snapshots?symbols=${symbols.map(encodeURIComponent).join(',')}&feed=${alpCfg.feed}`, alpHeaders()) || {}; } catch (_) {}
       for (const sym of symbols) {
         const arr = bars[sym] || [];
         let ref = null, refT = 0, ext = null;
@@ -420,14 +661,17 @@
           const tt = parseTs(lt.t), m = etInfo(tt).min;
           if (tt > refT && !(m >= RTH_OPEN && m < RTH_CLOSE) && (!ext || tt > ext.t)) ext = { price: lt.p, t: tt, session: m < RTH_OPEN ? 'pre' : 'post', delayed: false };
         }
+        if (ref == null && snaps[sym] && !this.hasAlp()) { // 只有 Tradier：参考价用常规时段收盘（盘后）或昨收（盘前）
+          const sn = snaps[sym]; ref = session === 'pre' || session === 'night' ? sn.trRef : (sn.trClose || sn.trRef);
+        }
         // 盘前时段只显示今天的盘前；还没有盘前成交时显示上一个盘后
         // 时段已经结束超过 15 分钟的价格是完整的，不算延迟
-        if (ext && ext.session !== session) ext.delayed = false;
+        if (ext && (ext.session !== session || useTr())) ext.delayed = false;
         if (ext && ref != null) out.quotes[sym] = { ...ext, ref };
         else if (ref != null) out.quotes[sym] = { session: session === 'pre' ? 'pre' : 'post', price: null, t: 0, ref };
       }
       if (session === 'night') {
-        if (nightOk !== false) {
+        if (nightOk !== false && this.hasAlp()) {
           try {
             const j = await getJSON(`${ALP_REST}/snapshots?symbols=${symbols.map(encodeURIComponent).join(',')}&feed=overnight`, alpHeaders());
             nightOk = true;
@@ -438,7 +682,7 @@
             }
           } catch (e) { if (e.kind === 'auth') nightOk = false; }
         }
-        if (nightOk === false) out.nightNote = '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。';
+        if (nightOk === false || !this.hasAlp()) out.nightNote = '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。';
       }
       return out;
     },
@@ -448,7 +692,7 @@
       const ev = [], notes = [];
       const day = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d, 14, 30); };
       const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
-      if (this.hasKey()) {
+      if (this.hasAlp()) {
         try {
           let token = null, pages = 0;
           do {
@@ -471,6 +715,11 @@
     // 筛选器用：多个品种的日线，一次请求（自动翻页）
     async dailyBars(symbols, n) {
       if (!this.hasKey()) throw new FeedError('未设置 API Key', 'auth');
+      if (!this.hasAlp()) { // 只有 Tradier：逐个品种查日线
+        const out = {}, now = Date.now();
+        for (const s of symbols) { try { out[s] = await trHistory(s, '1d', now - n * 1.5 * 86400e3, now); } catch (e) { if (e.kind === 'auth') throw e; } }
+        return out;
+      }
       const now = Date.now(), out = {};
       const feed = alpCfg.feed === 'sip' ? 'sip' : (sipHistoryOk ? 'sip' : 'iex');
       let token = null, pages = 0;
@@ -492,7 +741,7 @@
     subscribeKline(symbol, interval, onBar, onStatus, lastBar) {
       const ms = INTERVAL_MS[interval];
       let cur = lastBar ? { ...lastBar } : null;
-      return alpStream.add([symbol], (tr) => {
+      return liveStream().add([symbol], (tr) => {
         if (alpCfg.rthOnly && !tradeInRth(tr.t)) return; // 只看常规时段时，盘前盘后的成交不计入
         if (!cur) cur = { t: Math.floor(tr.t / ms) * ms, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
         if (tr.t < cur.t) return;
@@ -510,7 +759,7 @@
     },
     subscribeTickers(symbols, onTicker, onExt) {
       if (!symbols.length) return () => {};
-      return alpStream.add(symbols, (tr) => {
+      return liveStream().add(symbols, (tr) => {
         // 自选的“最新价”只算常规时段；盘前盘后的成交单独交给 onExt 显示在下面一行
         if (!tradeInRth(tr.t)) { if (onExt) onExt(tr.sym, { price: tr.p, t: tr.t, session: etSession(tr.t) }); return; }
         const pc = prevClose[tr.sym];

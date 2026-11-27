@@ -7,7 +7,7 @@
 ## 功能一览
 
 **行情**
-- 美股（Alpaca）和加密货币（OKX）实时行情，WebSocket 推送
+- 美股（Alpaca，或 Tradier 证券账户）和加密货币（OKX）实时行情，WebSocket 推送
 - 周期：1分、5分、15分、30分、1时、4时、日、周、月、今年至今
 - 多图同屏：1 / 2 / 4 / 6 / 8 个图，每个图的品种和周期都可以单独设置
 - 多图联动：十字线和时间位置同步。周期相同的图同步缩放和平移，周期不同的图只对齐时间
@@ -70,6 +70,8 @@
 1. 在 [alpaca.markets](https://alpaca.markets) 注册（不需要入金），然后在控制台生成 API Key。
 2. 点程序右上角的 ⚙，填入 Key ID 和 Secret，数据范围选「IEX（免费）」。
 
+**美股全市场实时（可选）**：如果你有 Tradier 证券账户，在 ⚙ 里填上它的 API Token（正式环境 Production 的，不要用 Sandbox），就能免费拿到全市场实时行情，含盘前盘后。填了以后，实时推送、最近 15 分钟的K线和最新价都改用 Tradier；更早的历史K线和分红拆股仍用 Alpaca。只填 Tradier 不填 Alpaca 也能用，但日内K线只能往前看大约 20–40 天。填完可以点「测试 Tradier」确认连通。
+
 **财报日（可选）**：Alpaca 不提供财报数据。到 [alphavantage.co](https://www.alphavantage.co/support/#api-key) 免费申请一个 Key，同样填到 ⚙ 里，就能显示财报标记。免费 Key 每天可查 25 次，程序会把每只股票的结果缓存 3 天。分红和拆股直接用 Alpaca 的 Key，不需要另外配置。
 
 **警报推送（可选）**：在 ⚙ 里填写，留空就不推送。
@@ -88,7 +90,7 @@ Alpaca 免费版的限制：
 - **夜盘**（20:00 到次日 04:00）：免费版拿不到数据，夜盘时段显示的是盘后最后一笔价格。
 - **订阅上限**：同时最多订阅 30 只股票，而且只能保持一条实时连接。同时打开两个窗口时，后打开的窗口会接管行情。
 
-如果需要全市场实时数据，可以订阅 Alpaca 的付费数据套餐（Algo Trader Plus），然后在设置里把数据范围改成 SIP，不需要改代码。
+如果需要全市场实时数据：有 Tradier 证券账户的话，填上 Tradier Token 就行（免费）；或者订阅 Alpaca 的付费数据套餐（Algo Trader Plus），然后在设置里把数据范围改成 SIP。都不需要改代码。
 
 ## 文件结构
 
@@ -97,7 +99,7 @@ index.html          页面结构
 style.css           样式
 js/chart.js         K线图引擎（Canvas 绘制、画线、交互、联动）
 js/indicators.js    技术指标计算
-js/feed.js          数据源（OKX、Alpaca、Alpha Vantage、演示数据），统一接口
+js/feed.js          数据源（OKX、Alpaca、Tradier、Alpha Vantage、演示数据），统一接口
 js/app.js           界面逻辑（多图、自选、警报、布局、筛选器、右键菜单）
 观潮看盘.app         Mac 启动器（shell 脚本打包的 .app）
 Start-Mac.command   Mac 启动脚本（会显示终端）

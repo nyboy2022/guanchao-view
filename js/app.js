@@ -31,7 +31,7 @@
     market: 'crypto', interval: '15m',
     markets: {},
     indicators: null,
-    alpaca: { key: '', secret: '', feed: 'iex' },
+    alpaca: { key: '', secret: '', feed: 'iex', tradier: '' },
     extHours: false,
     drawings: {},
     alerts: [],
@@ -488,15 +488,24 @@
   // ---------- 美股设置 ----------
   const dlg = $('settings'), form = $('settings-form');
   function openSettings() {
-    form.key.value = state.alpaca.key; form.secret.value = state.alpaca.secret; form.feed.value = state.alpaca.feed; form.avkey.value = state.avKey || '';
-    $('bk-res').textContent = ''; form.ntfy.value = state.push.ntfy; form.discord.value = state.push.discord; form.bark.value = state.push.bark; $('push-test-res').textContent = '';
+    form.key.value = state.alpaca.key; form.secret.value = state.alpaca.secret; form.feed.value = state.alpaca.feed; form.tradier.value = state.alpaca.tradier || ''; form.avkey.value = state.avKey || '';
+    $('bk-res').textContent = ''; form.ntfy.value = state.push.ntfy; form.discord.value = state.push.discord; form.bark.value = state.push.bark; $('push-test-res').textContent = ''; $('tr-test-res').textContent = '';
     dlg.showModal();
   }
   $('settings-btn').onclick = openSettings;
+  $('tr-test').onclick = async () => {
+    const el = $('tr-test-res'), tok = form.tradier.value.trim();
+    if (!tok) { el.textContent = '先填 Token'; return; }
+    el.textContent = '测试中…';
+    const r = await Feeds.AlpacaFeed.testTradier(tok);
+    if (!r.ok) { el.textContent = '✗ ' + r.msg; return; }
+    const age = r.t ? Math.round((Date.now() - r.t) / 60e3) : null;
+    el.textContent = `✓ 连接成功：AAPL 最新成交 ${fmtPx(r.last)}` + (r.t ? `（${new Date(r.t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${age != null && age < 2 ? '，实时' : ''}）` : '') + `，近几天分钟K线 ${r.bars} 根`;
+  };
   const readPushForm = () => ({ ntfy: form.ntfy.value.trim(), discord: form.discord.value.trim(), bark: form.bark.value.trim() });
   $('ntfy-gen').onclick = () => { const r = crypto.getRandomValues(new Uint8Array(9)); form.ntfy.value = 'guanchao-' + [...r].map((x) => 'abcdefghijkmnpqrstuvwxyz23456789'[x % 32]).join(''); };
   // ---------- 备份：导出 / 导入 ----------
-  const SECRET_FIELDS = (st) => { st.alpaca = { ...st.alpaca, key: '', secret: '' }; st.avKey = ''; st.push = { ntfy: '', discord: '', bark: '' }; return st; };
+  const SECRET_FIELDS = (st) => { st.alpaca = { ...st.alpaca, key: '', secret: '', tradier: '' }; st.avKey = ''; st.push = { ntfy: '', discord: '', bark: '' }; return st; };
   $('bk-export').onclick = () => {
     save();
     let data = JSON.parse(JSON.stringify(state));
@@ -524,7 +533,7 @@
       `现在的自选、画线、布局、警报和设置会被替换。` + (pack.withKeys ? '备份里的 Key 也会替换现在的 Key。' : '备份里没有 Key，会保留你现在的 Key。');
     if (!confirm(msg)) return;
     const next = { ...d };
-    if (!pack.withKeys) { next.alpaca = { ...(d.alpaca || {}), key: state.alpaca.key, secret: state.alpaca.secret }; next.avKey = state.avKey; next.push = { ...state.push }; }
+    if (!pack.withKeys) { next.alpaca = { ...(d.alpaca || {}), key: state.alpaca.key, secret: state.alpaca.secret, tradier: state.alpaca.tradier || '' }; next.avKey = state.avKey; next.push = { ...state.push }; }
     try { localStorage.setItem(STORE, JSON.stringify(next)); } catch (_) { $('bk-res').textContent = '保存失败'; return; }
     dlg.close(); location.reload();
   };
@@ -537,7 +546,7 @@
   };
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'save') return;
-    state.alpaca = { key: form.key.value.trim(), secret: form.secret.value.trim(), feed: form.feed.value };
+    state.alpaca = { key: form.key.value.trim(), secret: form.secret.value.trim(), feed: form.feed.value, tradier: form.tradier.value.trim() };
     const avChanged = (state.avKey || '') !== form.avkey.value.trim();
     state.avKey = form.avkey.value.trim(); if (avChanged) evCache.clear();
     state.push = readPushForm();
@@ -561,7 +570,7 @@
     // 连接恢复正常后，清掉之前因连接问题弹出的提示
     if (s === 'live' && statusBanner) { statusBanner = false; showBanner(''); }
     if (['autherr', 'noperm', 'connlimit', 'symlimit'].includes(s)) statusBanner = true;
-    if (s === 'autherr') showBanner('Alpaca 拒绝了你的 API Key，请检查 Key 和 Secret 是否填对。', '打开设置', openSettings);
+    if (s === 'autherr') showBanner(state.alpaca.tradier ? 'Alpaca Key 或 Tradier Token 被拒绝，请检查是否填对。Tradier 要用正式环境（Production）的 Access Token，不能用 Sandbox 的。' : 'Alpaca 拒绝了你的 API Key，请检查 Key 和 Secret 是否填对。', '打开设置', openSettings);
     if (s === 'noperm') showBanner('当前 Alpaca 账号没有 SIP 全市场实时数据权限（需要付费套餐）。可以在设置里改回 IEX（免费）。', '打开设置', openSettings);
     if (s === 'connlimit') showBanner('Alpaca 免费账号同时只能开一个行情连接，正在自动重试。如果一直连不上，请关掉其它正在使用这个 Key 的窗口或程序。');
     if (s === 'symlimit') showBanner('超过 Alpaca 免费账号的订阅上限（同时最多 30 只股票，包括所有图、当前自选列表和警报里的股票），请减少一些。');
@@ -646,9 +655,9 @@
     renderCellHead(c);
     const isActive = () => c.k === M().active;
     if (f === Feeds.AlpacaFeed && !f.hasKey()) {
-      c.emptyText = '请先点右上角「⚙ 设置」填入 Alpaca API Key';
+      c.emptyText = '请先点右上角「⚙ 设置」填入 Alpaca API Key 或 Tradier Token';
       c.status = 'nokey'; if (isActive()) setStatus('nokey');
-      showBanner('看美股实时行情需要一个免费的 Alpaca API Key：在 alpaca.markets 注册后生成，然后填到设置里。', '打开设置', openSettings);
+      showBanner('看美股实时行情需要一个免费的 Alpaca API Key（在 alpaca.markets 注册后生成），或者 Tradier 证券账户的 Token，填到设置里。', '打开设置', openSettings);
       c.chart.dirty = true;
       return;
     }
@@ -660,13 +669,13 @@
       if (err.kind === 'network' && f.id !== 'sim') {
         if (!usingSim[state.market]) {
           usingSim[state.market] = true;
-          showBanner(`无法连接${state.market === 'us' ? ' Alpaca' : ' OKX'} 行情接口（网络或地区限制），已切换为演示数据。图表上的价格不是真实行情。`);
+          showBanner(`无法连接${state.market === 'us' ? (state.alpaca.tradier ? ' Tradier' : ' Alpaca') : ' OKX'} 行情接口（网络或地区限制），已切换为演示数据。图表上的价格不是真实行情。`);
           startTickers(); loadAll();
         }
         return;
       }
       c.emptyText = err.kind === 'auth' ? 'API Key 无效或没有权限' : '加载失败：' + err.message;
-      c.status = err.kind === 'auth' ? (state.alpaca.feed === 'sip' ? 'noperm' : 'autherr') : 'error';
+      c.status = err.kind === 'auth' ? (state.alpaca.feed === 'sip' && !state.alpaca.tradier ? 'noperm' : 'autherr') : 'error';
       if (isActive()) setStatus(c.status);
       c.chart.dirty = true;
       return;

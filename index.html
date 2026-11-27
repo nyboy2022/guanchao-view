@@ -56,6 +56,10 @@
         <option value="sip">SIP（需付费套餐）：全美所有交易所</option>
       </select>
     </label>
+    <h3>美股实时（可选）：Tradier Token</h3>
+    <p class="hint">有 Tradier 证券账户的话，填上它的 API Token，就能免费拿到全市场实时行情（含盘前盘后），黄圈 D 会消失。在 Tradier 网站登录后，到 Settings → API Access 复制 <b>正式环境（Production）</b>的 Access Token，不要用 Sandbox 的（Sandbox 是延迟数据）。同时填了 Alpaca Key 的话，更早的历史K线和分红拆股仍用 Alpaca。</p>
+    <label>Access Token<input name="tradier" type="password" autocomplete="off" spellcheck="false" placeholder="留空就不用 Tradier"></label>
+    <div class="row left"><button type="button" class="btn" id="tr-test">测试 Tradier</button><span class="hint" id="tr-test-res"></span></div>
     <h3>警报推送到手机 / Discord（可选）</h3>
     <p class="hint">警报触发时，除了电脑上弹窗，还会推送到这里填的地方。填一个或几个都行，留空就不推。</p>
     <label>ntfy 主题<span class="inline"><input name="ntfy" autocomplete="off" spellcheck="false" placeholder="手机装 ntfy App，订阅同一个主题名"><button type="button" class="btn" id="ntfy-gen" title="生成一个别人猜不到的主题名">生成</button></span></label>
