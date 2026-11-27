@@ -310,3 +310,4 @@ kbd { display: inline-block; min-width: 16px; text-align: center; padding: 0 5px
   font: 700 9px system-ui, sans-serif; line-height: 1; cursor: help; flex: none; vertical-align: middle; margin-left: 3px; }
 .quote .dly { width: 16px; height: 16px; font-size: 10px; margin-left: -2px; }
 .watchlist li .ext .dly { margin-left: 0; }
+.status em { font-style: normal; color: #6b7587; cursor: help; }

@@ -169,7 +169,7 @@
 
   // 共享的成交流
   const alpStream = {
-    sock: null, authed: false, subscribed: new Set(), listeners: new Set(), statusCbs: new Set(), status: 'idle',
+    sock: null, authed: false, stats: { n: 0, last: null, src: 'Alpaca IEX' }, subscribed: new Set(), listeners: new Set(), statusCbs: new Set(), status: 'idle',
     setStatus(s) { this.status = s; this.statusCbs.forEach((f) => f(s)); },
     wanted() { const w = new Set(); this.listeners.forEach((l) => l.symbols.forEach((s) => w.add(s))); return w; },
     sync() {
@@ -208,6 +208,7 @@
               if (m.code === 402 || m.code === 409) { const s = this.sock; this.sock = null; s && s.close(); }
             } else if (m.T === 't') {
               const tr = { sym: m.S, p: +m.p, s: +m.s, t: parseTs(m.t) };
+              this.stats.n++; this.stats.last = tr;
               this.listeners.forEach((l) => l.symbols.has(tr.sym) && l.fn(tr));
             }
           }
@@ -377,10 +378,10 @@
   }
   // Tradier 实时推送：先用 REST 建一个 session，再连 WebSocket。同一账户同时只能有一个 session
   const trStream = {
-    ws: null, sessionid: '', listeners: new Set(), statusCbs: new Set(), status: 'idle', retry: 0, gen: 0,
+    ws: null, sessionid: '', stats: { n: 0, last: null, src: 'Tradier' }, listeners: new Set(), statusCbs: new Set(), status: 'idle', retry: 0, gen: 0,
     setStatus(s) { this.status = s; this.statusCbs.forEach((f) => f(s)); },
     wanted() { const w = new Set(); this.listeners.forEach((l) => l.symbols.forEach((s) => w.add(s))); return w; },
-    close() { this.gen++; clearTimeout(this.timer); if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch (_) {} } this.sessionid = ''; },
+    close() { this.gen++; this.opening = false; clearTimeout(this.timer); if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch (_) {} } this.sessionid = ''; },
     sync() {
       if (this.paused || !trCfg.token) { this.close(); return; }
       const want = this.wanted();
@@ -389,22 +390,23 @@
         this.idleTimer = setTimeout(() => { if (!this.wanted().size) { this.close(); this.status = 'idle'; } }, 5000);
         return;
       }
-      if (!this.ws) { this.open(); return; }
+      if (!this.ws) { if (!this.opening) this.open(); return; }
       if (this.ws.readyState === 1) this.sendSubs();
     },
     sendSubs() {
       const want = [...this.wanted()];
-      if (want.length) this.ws.send(JSON.stringify({ symbols: want, sessionid: this.sessionid, filter: ['trade'], linebreak: true, validOnly: true }));
+      if (want.length) this.ws.send(JSON.stringify({ symbols: want, sessionid: this.sessionid, filter: ['trade'], linebreak: true, validOnly: false })); // validOnly 为 true 时盘前盘后的成交会被过滤掉
     },
     async open() {
       const gen = ++this.gen;
       this.setStatus('connecting');
       let sid = '';
+      this.opening = true;
       try {
         const r = await fetch(`${TR_REST}/markets/events/session`, { method: 'POST', headers: trHeaders() });
         if (r.status === 401 || r.status === 403) { if (gen === this.gen) this.setStatus('autherr'); return; }
         const j = await r.json(); sid = j && j.stream && j.stream.sessionid;
-      } catch (_) {}
+      } catch (_) {} finally { this.opening = false; }
       if (gen !== this.gen) return;
       if (!sid) { this.reconnect(gen); return; }
       this.sessionid = sid;
@@ -418,6 +420,7 @@
           if (m.type !== 'trade' || !m.symbol) continue;
           const tr = { sym: m.symbol, p: +m.price, s: +m.size || 0, t: +m.date || Date.now() };
           if (!isFinite(tr.p) || tr.p <= 0) continue;
+          this.stats.n++; this.stats.last = tr;
           this.listeners.forEach((l) => l.symbols.has(tr.sym) && l.fn(tr));
         }
       };
@@ -462,6 +465,7 @@
       }
     },
     usingTradier() { return useTr(); },
+    streamStats() { const st = liveStream(); return { ...st.stats, subs: st.wanted().size, status: st.status }; },
     // 设置里的「测试」按钮：用填的 Token 查一次 AAPL 报价和今天的分钟K线
     async testTradier(token) {
       const old = trCfg.token; trCfg.token = token;

@@ -561,6 +561,15 @@
     autherr: 'API Key 无效', noperm: '无权限（SIP 需付费套餐）', paused: '已暂停（其它窗口在用）', connlimit: '连接数超限', symlimit: '订阅数超限', nokey: '未设置 API Key',
   };
   let statusBanner = false;
+  // 实时推送诊断：状态旁显示最近一笔成交是几秒前，鼠标移上去看详情
+  setInterval(() => {
+    const el = $('status'), f = feed();
+    if (!el || !f.streamStats || el.dataset.state !== 'live') { if (el) el.title = ''; const x = el && el.querySelector('em'); if (x) x.remove(); return; }
+    const st = f.streamStats(), age = st.last ? Math.max(0, Math.round((Date.now() - st.last.t) / 1000)) : null;
+    let em = el.querySelector('em'); if (!em) { em = document.createElement('em'); el.appendChild(em); }
+    em.textContent = age == null ? ' · 等待成交' : age < 60 ? ` · ${age}秒前` : age < 3600 ? ` · ${Math.round(age / 60)}分钟前` : ' · 暂无新成交';
+    el.title = `实时来源：${st.src}，订阅 ${st.subs} 只\n收到成交 ${st.n} 笔` + (st.last ? `\n最近一笔：${st.last.sym} ${fmtPx(st.last.p)}，${new Date(st.last.t).toLocaleTimeString('zh-CN')}` : '');
+  }, 2000);
   function setStatus(s, quiet) {
     const el = $('status');
     el.className = 'status ' + (s === 'live' ? 'live' : s === 'sim' || s === 'nokey' ? 'sim' : '');
