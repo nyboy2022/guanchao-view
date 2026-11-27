@@ -56,11 +56,67 @@
         <option value="sip">SIP（需付费套餐）：全美所有交易所</option>
       </select>
     </label>
+    <h3>警报推送到手机 / Discord（可选）</h3>
+    <p class="hint">警报触发时，除了电脑上弹窗，还会推送到这里填的地方。填一个或几个都行，留空就不推。</p>
+    <label>ntfy 主题<span class="inline"><input name="ntfy" autocomplete="off" spellcheck="false" placeholder="手机装 ntfy App，订阅同一个主题名"><button type="button" class="btn" id="ntfy-gen" title="生成一个别人猜不到的主题名">生成</button></span></label>
+    <p class="hint small">ntfy 免费、不用注册：手机装 ntfy（iPhone / Android 都有），点 + 订阅这里的主题名。主题名谁知道谁就能收到，所以用「生成」的随机名字。也可以填完整地址，如 https://ntfy.sh/xxx。</p>
+    <label>Discord Webhook<input name="discord" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…"></label>
+    <p class="hint small">在 Discord 频道设置 → 整合 → Webhook → 新建，复制网址贴到这里。</p>
+    <label>Bark（iPhone）<input name="bark" autocomplete="off" spellcheck="false" placeholder="Bark App 里的推送地址，如 https://api.day.app/xxxx"></label>
+    <div class="row left"><button type="button" class="btn" id="push-test">发一条测试</button><span class="hint" id="push-test-res"></span></div>
     <h3>财报日（可选）：Alpha Vantage Key</h3>
     <p class="hint">分红和拆股直接用上面的 Alpaca Key，不用另外设置。财报日 Alpaca 不提供，需要在 alphavantage.co 免费申请一个 Key（每天 25 次查询，程序会把每只股票的结果存 3 天）。不填就只显示分红和拆股。</p>
     <label>Alpha Vantage Key<input name="avkey" autocomplete="off" spellcheck="false"></label>
+    <h3>备份</h3>
+    <p class="hint">把自选列表、画线、布局、警报、指标和其它设置存成一个文件，换电脑或重装时导入就能恢复。导入会替换现在的这些内容。</p>
+    <label class="check"><input type="checkbox" id="bk-keys">备份里包含 API Key 和推送地址（文件要自己保管好，不要发给别人）</label>
+    <div class="row left"><button type="button" class="btn" id="bk-export">导出备份</button><button type="button" class="btn" id="bk-import">导入备份…</button><input type="file" id="bk-file" accept=".json,application/json" hidden><span class="hint" id="bk-res"></span></div>
     <div class="row"><button class="btn" value="cancel" formnovalidate>取消</button><button class="btn primary" value="save">保存</button></div>
   </form>
+</dialog>
+
+<div id="sym-search" hidden>
+  <input id="sym-input" spellcheck="false" autocomplete="off" placeholder="输入代码，回车打开">
+  <ul id="sym-sug"></ul>
+  <small>回车在当前图打开 · ↑↓ 选择 · Esc 取消</small>
+</div>
+
+<dialog id="keys-help">
+  <h3>快捷键</h3>
+  <div class="keys-grid">
+    <div><h4>品种与图</h4>
+      <p><kbd>A</kbd>–<kbd>Z</kbd> 直接打字</p><small>弹出代码框，回车在当前图打开</small>
+      <p><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></p><small>多图时切换当前图</small>
+      <p><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>5</kbd></p><small>切换为 1 / 2 / 4 / 6 / 8 个图</small>
+    </div>
+    <div><h4>周期</h4>
+      <p><kbd>,</kbd> / <kbd>.</kbd></p><small>上一个 / 下一个周期</small>
+      <p><kbd>Shift</kbd>+<kbd>1</kbd>…<kbd>9</kbd>、<kbd>Shift</kbd>+<kbd>0</kbd></p><small>1分 5分 15分 30分 1时 4时 日 周 月，今年至今</small>
+    </div>
+    <div><h4>移动与缩放</h4>
+      <p><kbd>←</kbd> <kbd>→</kbd></p><small>左右平移（按住 Shift 移得更多）</small>
+      <p><kbd>↑</kbd> <kbd>↓</kbd></p><small>放大 / 缩小</small>
+      <p><kbd>End</kbd></p><small>回到最新</small>
+      <p><kbd>Home</kbd></p><small>重置缩放</small>
+    </div>
+    <div><h4>画线（Alt + 字母）</h4>
+      <p><kbd>Alt</kbd>+<kbd>T</kbd> 趋势线　<kbd>Alt</kbd>+<kbd>R</kbd> 射线</p>
+      <p><kbd>Alt</kbd>+<kbd>H</kbd> 水平线　<kbd>Alt</kbd>+<kbd>C</kbd> 平行通道</p>
+      <p><kbd>Alt</kbd>+<kbd>B</kbd> 矩形　<kbd>Alt</kbd>+<kbd>F</kbd> 斐波那契</p>
+      <p><kbd>Alt</kbd>+<kbd>X</kbd> 斐波那契扩展　<kbd>Alt</kbd>+<kbd>N</kbd> 文字</p>
+      <p><kbd>Alt</kbd>+<kbd>M</kbd> 测量</p>
+      <p><kbd>Delete</kbd></p><small>删除选中的画线</small>
+      <p><kbd>Esc</kbd></p><small>取消画线 / 关闭弹窗</small>
+    </div>
+    <div><h4>其它</h4>
+      <p><kbd>Alt</kbd>+<kbd>A</kbd></p><small>在现价设警报（打开警报面板）</small>
+      <p><kbd>Alt</kbd>+<kbd>I</kbd></p><small>打开指标</small>
+      <p><kbd>Alt</kbd>+<kbd>S</kbd></p><small>打开筛选器</small>
+      <p><kbd>?</kbd></p><small>打开这个帮助</small>
+    </div>
+  </div>
+  <p class="hint">在 Mac 上 Alt 就是 Option（⌥）键。输入框里打字时快捷键不生效。</p>
+  <div class="row"><button class="btn primary" id="keys-close">知道了</button></div>
 </dialog>
 
 <dialog id="screener">
@@ -119,6 +175,7 @@
     <button data-tool="measure" title="测量：拖一下，显示涨跌幅、K线根数和时间">
       <svg viewBox="0 0 24 24"><path d="M4 20L20 4M4 20h6M4 20v-6M20 4h-6M20 4v6"/></svg></button>
     <hr>
+    <button id="keys-btn" title="快捷键（按 ? 也能打开）"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 11h1M11 11h1M15 11h1M8 15h8"/></svg></button>
     <button id="latest-btn" title="回到最新K线并重置缩放">
       <svg viewBox="0 0 24 24"><path d="M5 12h12M13 7l5 5-5 5M20 5v14"/></svg></button>
     <button id="alert-line" title="给选中的画线（水平线 / 趋势线）设警报：价格穿过这条线时提醒">

@@ -90,6 +90,7 @@
       this.resize();
       const loop = () => {
         requestAnimationFrame(loop); // 先排下一帧：即使这一帧出错，图表也不会就此停止刷新
+        if (this._needRecalc && performance.now() - (this._lastRecalc || 0) > 250) { try { this.recalc(); } catch (_) {} }
         if (!this.dirty) return;
         this.dirty = false;
         try { this.render(); }
@@ -121,13 +122,15 @@
       if (!n) return;
       const last = this.bars[n - 1];
       const following = this.rightIndex >= n - 1 - 0.5;
-      if (bar.t === last.t) this.bars[n - 1] = bar;
-      else if (bar.t > last.t) {
+      this.lastTickAt = Date.now();
+      if (bar.t === last.t) {
+        // 同一根K线的实时跳动：K线立即更新，指标最多每 250 毫秒重算一次（繁忙股票每秒几十笔成交）
+        this.bars[n - 1] = bar; this._needRecalc = true; this.dirty = true;
+      } else if (bar.t > last.t) {
         this.bars.push(bar);
         if (following) this.rightIndex += 1;
-      } else return;
-      this.lastTickAt = Date.now();
-      this.recalc();
+        this.recalc(); // 新K线：马上重算，保证指标数组和K线一样长
+      }
     }
     setIndicators(list) { this.indicators = list.map((x) => ({ ...x, params: { ...x.params } })); this.recalc(); }
     // K线样式：candle 蜡烛 / hollow 空心 / ha 平均K线 / line 折线 / area 面积
@@ -164,6 +167,7 @@
     }
     _displayBars() { return this.chartType === 'ha' && this.ha ? this.ha : this.bars; }
     recalc() {
+      this._needRecalc = false; this._lastRecalc = performance.now();
       if (this.chartType === 'ha') {
         const ha = []; for (let i = 0; i < this.bars.length; i++) {
           const b = this.bars[i], c = (b.o + b.h + b.l + b.c) / 4, o = i ? (ha[i - 1].o + ha[i - 1].c) / 2 : (b.o + b.c) / 2;
@@ -252,6 +256,12 @@
     addDrawing(d) { this.drawings.push(d); this.selectedId = d.id; this._drawingsChanged(); }
     drawingsChanged() { this._drawingsChanged(); }
     selectDrawing(id) { this.selectedId = id; this.dirty = true; this._selChanged(); }
+    // 键盘：按可见宽度的比例平移；按倍数缩放（以右边缘为基准）
+    panBy(frac) {
+      if (!this._L || !this.bars.length) return;
+      this.rightIndex += (this._L.plotW / this.spacing) * frac; this._clampView(); this._maybeNeedMore(); this.dirty = true; this._emitView();
+    }
+    zoomBy(f) { if (!this._L) return; this._zoomAround(this._L.plotW, this.spacing * f, true); this.dirty = true; this._emitView(); }
     resetView() { this.spacing = 8; this.goLatest(); this._clampView(); this._emitView(); }
 
     // ---------------- 布局与坐标 ----------------

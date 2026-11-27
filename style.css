@@ -280,3 +280,27 @@ dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6p
 #ctx-menu .chip-b.on { border-color: #ffb547; color: #ffb547; }
 #ctx-menu .sw { width: 20px; height: 20px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; padding: 0; }
 #ctx-menu .sw.on { border-color: #fff; }
+
+/* 代码框 */
+#sym-search { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 60; width: 340px; background: #161d29; border: 1px solid #3a4760; border-radius: 10px; padding: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.55); }
+#sym-search[hidden] { display: none; }
+#sym-input { width: 100%; box-sizing: border-box; font: 600 20px ui-monospace, Menlo, monospace; text-transform: uppercase; background: #0d1117; color: #ffb547; border: 1px solid #263042; border-radius: 6px; padding: 8px 10px; outline: none; }
+#sym-sug { list-style: none; margin: 6px 0 4px; padding: 0; }
+#sym-sug li { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 5px; cursor: pointer; font: 13px ui-monospace, Menlo, monospace; }
+#sym-sug li span { color: #8b95a7; }
+#sym-sug li.on, #sym-sug li:hover { background: #22304a; }
+#sym-search small { color: #6b7790; font-size: 11px; padding: 0 2px; }
+/* 快捷键帮助 */
+#keys-help { width: min(780px, 92vw); max-width: none; box-sizing: border-box; }
+.keys-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 20px; }
+.keys-grid h4 { margin: 10px 0 4px; color: #ffb547; font-size: 13px; }
+.keys-grid p { margin: 6px 0 0; font-size: 13px; }
+.keys-grid small { display: block; color: #8b95a7; font-size: 11px; }
+kbd { display: inline-block; min-width: 16px; text-align: center; padding: 0 5px; border: 1px solid #3a4760; border-bottom-width: 2px; border-radius: 4px; background: #0d1117; font: 11px ui-monospace, Menlo, monospace; color: #d5dbe6; line-height: 18px; }
+
+#settings-form .inline { display: flex; gap: 6px; } #settings-form .inline input { flex: 1; min-width: 0; }
+#settings-form .hint.small { font-size: 11px; margin-top: -2px; }
+#settings-form .row.left { justify-content: flex-start; align-items: center; gap: 10px; }
+#settings { max-height: 92vh; overflow: auto; }
+#settings-form label.check { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
+#settings-form label.check input { width: auto; }

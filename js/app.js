@@ -37,6 +37,7 @@
     alerts: [],
     alertLog: [],
     avKey: '',
+    push: { ntfy: '', discord: '', bark: '' },
     events: true,
     layouts: [],
   };
@@ -70,6 +71,7 @@
   if (!Array.isArray(state.alerts)) state.alerts = [];
   if (!Array.isArray(state.alertLog)) state.alertLog = [];
   if (!Array.isArray(state.layouts)) state.layouts = [];
+  state.push = { ...defaults.push, ...(state.push || {}) };
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (_) {} };
   Feeds.AlpacaFeed.configure(state.alpaca);
   Feeds.AlpacaFeed.setRthOnly(!state.extHours);
@@ -385,11 +387,91 @@
   document.querySelectorAll('#tools [data-tool]').forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
   $('del-sel').onclick = () => activeCell().chart.deleteSelected();
   $('del-all').onclick = () => activeCell().chart.clearDrawings();
+  // ---------- 快捷键 ----------
+  const KEY_TOOLS = { KeyT: 'trend', KeyR: 'ray', KeyH: 'hline', KeyC: 'channel', KeyB: 'rect', KeyF: 'fib', KeyX: 'fibext', KeyN: 'text', KeyM: 'measure' };
+  const anyDialogOpen = () => [...document.querySelectorAll('dialog')].some((d) => d.open);
   document.addEventListener('keydown', (e) => {
-    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-    if (e.key === 'Delete' || e.key === 'Backspace') activeCell().chart.deleteSelected();
-    if (e.key === 'Escape') setTool('cursor');
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.target.isContentEditable) return;
+    if (anyDialogOpen() || !$('sym-search').hidden) return;
+    if (e.metaKey || e.ctrlKey) return; // 不抢系统快捷键（复制、刷新等）
+    const c = activeCell(), ch = c && c.chart;
+    const done = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === 'Delete' || e.key === 'Backspace') { ch.deleteSelected(); return done(); }
+    if (e.key === 'Escape') { setTool('cursor'); closeCtx(); return; }
+    if (e.altKey) {
+      if (KEY_TOOLS[e.code]) { setTool(KEY_TOOLS[e.code]); return done(); }
+      const dg = /^Digit([1-5])$/.exec(e.code);
+      if (dg) { $('layout').querySelector(`[data-n="${LAYOUTS[+dg[1] - 1]}"]`).click(); return done(); }
+      if (e.code === 'KeyA') { $('alert-btn').click(); return done(); }
+      if (e.code === 'KeyI') { $('ind-btn').click(); return done(); }
+      if (e.code === 'KeyS') { $('sc-btn').click(); return done(); }
+      return;
+    }
+    if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) { $('keys-help').showModal(); return done(); }
+    if (e.shiftKey && /^Digit\d$/.test(e.code)) {
+      const n = +e.code.slice(5), id = n === 0 ? 'ytd' : INTERVALS[n - 1] && INTERVALS[n - 1][0];
+      if (id) { ivBox.querySelector(`[data-iv="${id}"]`).click(); return done(); }
+    }
+    if (e.key === ',' || e.key === '.') {
+      const ids = INTERVALS.map((x) => x[0]), k = ids.indexOf(ivKey(M().active));
+      const nk = Math.max(0, Math.min(ids.length - 1, k + (e.key === '.' ? 1 : -1)));
+      if (nk !== k) ivBox.querySelector(`[data-iv="${ids[nk]}"]`).click();
+      return done();
+    }
+    if (!ch) return;
+    if (e.key === 'ArrowLeft') { ch.panBy(e.shiftKey ? -0.5 : -0.1); return done(); }
+    if (e.key === 'ArrowRight') { ch.panBy(e.shiftKey ? 0.5 : 0.1); return done(); }
+    if (e.key === 'ArrowUp') { ch.zoomBy(1.25); return done(); }
+    if (e.key === 'ArrowDown') { ch.zoomBy(0.8); return done(); }
+    if (e.key === 'End') { ch.goLatest(); return done(); }
+    if (e.key === 'Home') { ch.resetView(); return done(); }
+    if (e.key === 'Tab' && M().layout > 1) { const n = M().layout; setActive((M().active + (e.shiftKey ? n - 1 : 1)) % n); return done(); }
+    // 直接打字：字母或数字开头，弹出代码框
+    if (!e.shiftKey && e.key.length === 1 && /[a-z0-9]/i.test(e.key)) { openSymSearch(e.key); return done(); }
   });
+  $('keys-btn').onclick = () => $('keys-help').showModal();
+  $('keys-close').onclick = () => $('keys-help').close();
+
+  // 代码框：输入代码回车，在当前图打开；下面列出自选里匹配的品种
+  const symBox = $('sym-search'), symIn = $('sym-input'), symSug = $('sym-sug');
+  let sugSel = 0, sugList = [];
+  function allKnownSyms() {
+    const set = new Set();
+    for (const l of M().lists) for (const it of l.items) if (it.t === 's') set.add(it.s);
+    for (const x of compares()) set.add(x);
+    return [...set];
+  }
+  function renderSug() {
+    const q = symIn.value.trim().toUpperCase();
+    const all = allKnownSyms();
+    sugList = q ? all.filter((x) => x.startsWith(q)).concat(all.filter((x) => !x.startsWith(q) && x.includes(q))).slice(0, 8) : [];
+    sugSel = Math.min(sugSel, Math.max(0, sugList.length - 1));
+    symSug.innerHTML = sugList.map((x, k) => `<li class="${k === sugSel ? 'on' : ''}" data-s="${esc(x)}">${esc(x)}<span>${tickers[x] ? fmtPx(tickers[x].last) : ''}</span></li>`).join('');
+  }
+  function openSymSearch(first) {
+    symBox.hidden = false; symIn.value = first || ''; sugSel = 0; renderSug();
+    symIn.focus(); symIn.setSelectionRange(symIn.value.length, symIn.value.length);
+  }
+  const closeSym = () => { symBox.hidden = true; symIn.blur(); };
+  async function submitSym(raw) {
+    const s = feed().normalizeSymbol(raw || '');
+    closeSym();
+    if (!s) return;
+    if (!allKnownSyms().includes(s)) {
+      let ok = false; try { ok = await feed().validateSymbol(s); } catch (_) {}
+      if (!ok) { alertToast('找不到这个代码', s); return; }
+    }
+    openSymbol(s);
+  }
+  symIn.addEventListener('input', () => { sugSel = 0; renderSug(); });
+  symIn.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeSym(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sugSel = Math.min(sugList.length - 1, sugSel + 1); renderSug(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sugSel = Math.max(0, sugSel - 1); renderSug(); }
+    else if (e.key === 'Enter') { e.preventDefault(); const q = symIn.value.trim().toUpperCase(); submitSym(sugList.length && sugList[sugSel] && (sugSel > 0 || sugList[0].startsWith(q)) ? sugList[sugSel] : symIn.value); }
+  });
+  symIn.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== symIn) symBox.hidden = true; }, 150));
+  symSug.addEventListener('pointerdown', (e) => { const li = e.target.closest('li'); if (li) { e.preventDefault(); submitSym(li.dataset.s); } });
   function drawingsChanged(c, list) {
     state.drawings[c.symbol] = list;
     // 画线被删掉了，对应的画线警报也一起删掉
@@ -407,14 +489,58 @@
   const dlg = $('settings'), form = $('settings-form');
   function openSettings() {
     form.key.value = state.alpaca.key; form.secret.value = state.alpaca.secret; form.feed.value = state.alpaca.feed; form.avkey.value = state.avKey || '';
+    $('bk-res').textContent = ''; form.ntfy.value = state.push.ntfy; form.discord.value = state.push.discord; form.bark.value = state.push.bark; $('push-test-res').textContent = '';
     dlg.showModal();
   }
   $('settings-btn').onclick = openSettings;
+  const readPushForm = () => ({ ntfy: form.ntfy.value.trim(), discord: form.discord.value.trim(), bark: form.bark.value.trim() });
+  $('ntfy-gen').onclick = () => { const r = crypto.getRandomValues(new Uint8Array(9)); form.ntfy.value = 'guanchao-' + [...r].map((x) => 'abcdefghijkmnpqrstuvwxyz23456789'[x % 32]).join(''); };
+  // ---------- 备份：导出 / 导入 ----------
+  const SECRET_FIELDS = (st) => { st.alpaca = { ...st.alpaca, key: '', secret: '' }; st.avKey = ''; st.push = { ntfy: '', discord: '', bark: '' }; return st; };
+  $('bk-export').onclick = () => {
+    save();
+    let data = JSON.parse(JSON.stringify(state));
+    const withKeys = $('bk-keys').checked;
+    if (!withKeys) data = SECRET_FIELDS(data);
+    const pack = { app: 'guanchao', version: 1, exportedAt: new Date().toISOString(), withKeys, data };
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    const name = `guanchao-backup-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+    const a = document.createElement('a');
+    // 用 data: 地址：本地文件打开的页面里 blob: 地址会丢掉文件名
+    a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(pack, null, 1));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    $('bk-res').textContent = `已导出 ${name}（在「下载」文件夹）` + (withKeys ? '，包含 Key' : '，不含 Key');
+  };
+  $('bk-import').onclick = () => $('bk-file').click();
+  $('bk-file').onchange = async () => {
+    const f = $('bk-file').files[0]; $('bk-file').value = '';
+    if (!f) return;
+    let pack;
+    try { pack = JSON.parse(await f.text()); } catch (_) { $('bk-res').textContent = '这个文件不是有效的备份'; return; }
+    if (!pack || pack.app !== 'guanchao' || !pack.data || typeof pack.data !== 'object' || !pack.data.markets) { $('bk-res').textContent = '这个文件不是观潮看盘的备份'; return; }
+    const d = pack.data, n = (m) => (d.markets[m] && d.markets[m].lists || []).reduce((k, l) => k + l.items.filter((x) => x.t === 's').length, 0);
+    const msg = `导入 ${new Date(pack.exportedAt).toLocaleString()} 的备份？\n\n` +
+      `美股 ${n('us')} 只、加密货币 ${n('crypto')} 只，画线 ${Object.values(d.drawings || {}).reduce((k, l) => k + l.length, 0)} 条，布局 ${(d.layouts || []).length} 个，警报 ${(d.alerts || []).length} 个。\n\n` +
+      `现在的自选、画线、布局、警报和设置会被替换。` + (pack.withKeys ? '备份里的 Key 也会替换现在的 Key。' : '备份里没有 Key，会保留你现在的 Key。');
+    if (!confirm(msg)) return;
+    const next = { ...d };
+    if (!pack.withKeys) { next.alpaca = { ...(d.alpaca || {}), key: state.alpaca.key, secret: state.alpaca.secret }; next.avKey = state.avKey; next.push = { ...state.push }; }
+    try { localStorage.setItem(STORE, JSON.stringify(next)); } catch (_) { $('bk-res').textContent = '保存失败'; return; }
+    dlg.close(); location.reload();
+  };
+  $('push-test').onclick = async () => {
+    const cfg = readPushForm(), el = $('push-test-res');
+    if (!cfg.ntfy && !cfg.discord && !cfg.bark) { el.textContent = '先填一个推送方式'; return; }
+    el.textContent = '发送中…';
+    const r = await sendPush('🔔 观潮看盘测试', '收到这条，说明警报推送设置好了。', cfg);
+    el.textContent = r.map((x) => `${x.name}${x.ok === true ? ' ✓ 已发出' : x.ok === false ? ' ✗ ' + x.err : ' 已发出（请看手机/频道）'}`).join('　');
+  };
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'save') return;
     state.alpaca = { key: form.key.value.trim(), secret: form.secret.value.trim(), feed: form.feed.value };
     const avChanged = (state.avKey || '') !== form.avkey.value.trim();
     state.avKey = form.avkey.value.trim(); if (avChanged) evCache.clear();
+    state.push = readPushForm();
     save(); Feeds.AlpacaFeed.configure(state.alpaca);
     if (!FORCE_DEMO) usingSim.us = false;
     if (state.market === 'us') startMarket(); else startAlertWatch();
@@ -547,8 +673,7 @@
       if (token !== c.token) return;
       lastEventAt = Date.now();
       c.chart.updateBar(bar);
-      renderCellHead(c);
-      if (isActive()) renderQuote();
+      uiLater('head' + c.k, () => { renderCellHead(c); if (isActive()) renderQuote(); }); // 文字最多每帧刷新一次
       onPrice(state.market, symbol, bar.c);
     }, (s) => { c.status = s; if (isActive()) setStatus(s); }, bars[bars.length - 1]);
   }
@@ -688,9 +813,22 @@
   }
 
   // snapshot = true：来自定时快照（可能和逐笔成交来源不同），只作为警报的比较基准，不触发警报
+  // 把同一帧里的多次界面刷新合并成一次（繁忙股票每秒几十笔成交）
+  const uiJobs = new Map(); let uiRaf = 0;
+  function uiLater(key, fn) {
+    uiJobs.set(key, fn);
+    if (!uiRaf) uiRaf = requestAnimationFrame(() => { uiRaf = 0; const jobs = [...uiJobs.values()]; uiJobs.clear(); for (const f of jobs) { try { f(); } catch (_) {} } });
+  }
+  const shownPx = {}; // 自选里上次画出来的价格（决定闪绿还是闪红）
   function updateTickerRow(s, t, snapshot) {
-    const prev = tickers[s];
     tickers[s] = t;
+    for (const c of visibleCells()) if (!snapshot && c.symbol !== s && compares().includes(s)) c.chart.updateCompareLast(s, t.last);
+    onPrice(state.market, s, t.last, snapshot);
+    uiLater('tk' + s, () => renderTickerRow(s));
+  }
+  function renderTickerRow(s) {
+    const t = tickers[s]; if (!t) return;
+    const prev = shownPx[s] != null ? { last: shownPx[s] } : null; shownPx[s] = t.last;
     for (const li of ul.querySelectorAll(`li[data-sym="${CSS.escape(s)}"]`)) {
       li.querySelector('.px').textContent = fmtPx(t.last);
       const c = li.querySelector('.chg');
@@ -702,9 +840,8 @@
       }
     }
     if (extQ[s]) renderExtRow(s);
-    for (const c of visibleCells()) { if (c.symbol === s) renderCellHead(c); if (!snapshot && compares().includes(s)) c.chart.updateCompareLast(s, t.last); }
+    for (const c of visibleCells()) if (c.symbol === s) renderCellHead(c);
     if (activeCell() && s === activeCell().symbol) renderQuote();
-    onPrice(state.market, s, t.last, snapshot);
   }
   // 需要实时报价的品种：当前列表 + 所有图 + 本市场有生效警报的品种（Alpaca 免费版一条连接最多 30 只）
   function wantedSyms() {
@@ -825,6 +962,31 @@
   }
   const hhmmss = (t) => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
   const fullTime = (t) => new Date(t).toLocaleString('zh-CN', { hour12: false });
+  // ---------- 推送到手机 / Discord ----------
+  // 都用浏览器能直接发的“简单请求”，不需要后台服务；Discord 和 Bark 没有跨域回应，只能确认“已发出”
+  async function sendPush(title, body, cfg) {
+    cfg = cfg || state.push; const out = [];
+    if (cfg.ntfy) {
+      let server = 'https://ntfy.sh', topic = cfg.ntfy;
+      const m = /^(https?:\/\/[^/]+)\/([^/?#]+)/.exec(cfg.ntfy); if (m) { server = m[1]; topic = m[2]; }
+      try {
+        const r = await fetch(server + '/', { method: 'POST', body: JSON.stringify({ topic, title, message: body, tags: ['chart_with_upwards_trend'], priority: 4 }) });
+        out.push({ name: 'ntfy', ok: r.ok, err: 'HTTP ' + r.status });
+      } catch (e) { out.push({ name: 'ntfy', ok: false, err: '连不上' }); }
+    }
+    if (cfg.discord) {
+      try {
+        const fd = new FormData(); fd.append('payload_json', JSON.stringify({ content: `**${title}**\n${body}`, username: '观潮看盘' }));
+        await fetch(cfg.discord, { method: 'POST', body: fd, mode: 'no-cors' }); out.push({ name: 'Discord', ok: null });
+      } catch (e) { out.push({ name: 'Discord', ok: false, err: '连不上' }); }
+    }
+    if (cfg.bark) {
+      const base = /^https?:\/\//.test(cfg.bark) ? cfg.bark.replace(/\/+$/, '') : 'https://api.day.app/' + cfg.bark;
+      try { await fetch(`${base}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?group=${encodeURIComponent('观潮看盘')}`, { mode: 'no-cors' }); out.push({ name: 'Bark', ok: null }); }
+      catch (e) { out.push({ name: 'Bark', ok: false, err: '连不上' }); }
+    }
+    return out;
+  }
   function fireAlert(a, p, lv, dir) {
     const title = `🔔 ${a.symbol} ${dir} ${fmtPx(lv)}`;
     const body = `现价 ${fmtPx(p)} · ${a.kind === 'line' ? '画线警报' : '到价警报'} · ${hhmmss(Date.now())}` + (a.repeat === 'every' ? '' : '（已自动关闭）');
@@ -833,6 +995,7 @@
     alertToast(title, body, true);
     beep();
     try { if (window.Notification && Notification.permission === 'granted') new Notification(title, { body }); } catch (_) {}
+    sendPush(title, body);
     flashTitle = true; renderQuote();
   }
   window.addEventListener('focus', () => { if (flashTitle) { flashTitle = false; renderQuote(); } });
