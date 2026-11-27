@@ -32,7 +32,7 @@
     markets: {},
     indicators: null,
     alpaca: { key: '', secret: '', feed: 'iex', tradier: '' },
-    extHours: false,
+    extHours: true,
     drawings: {},
     alerts: [],
     alertLog: [],
@@ -72,6 +72,8 @@
   if (!Array.isArray(state.alertLog)) state.alertLog = [];
   if (!Array.isArray(state.layouts)) state.layouts = [];
   state.push = { ...defaults.push, ...(state.push || {}) };
+  // 2026-11：改成默认包含盘前盘后（任何时段K线都实时跳动），老设置迁移一次
+  if (!state.extV2) { state.extHours = true; state.extV2 = true; }
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (_) {} };
   Feeds.AlpacaFeed.configure(state.alpaca);
   Feeds.AlpacaFeed.setRthOnly(!state.extHours);
@@ -849,10 +851,23 @@
     if (!uiRaf) uiRaf = requestAnimationFrame(() => { uiRaf = 0; const jobs = [...uiJobs.values()]; uiJobs.clear(); for (const f of jobs) { try { f(); } catch (_) {} } });
   }
   const shownPx = {}; // 自选里上次画出来的价格（决定闪绿还是闪红）
-  function updateTickerRow(s, t, snapshot) {
+  // 美股非常规时段：大数字也跟着盘前 / 盘后 / 夜盘的最新成交跳动
+  //   涨跌幅基准：盘前、夜盘相对最近一个常规时段收盘；盘后相对昨收（即全天涨跌）
+  const closeRef = {}, prevRef = {};
+  function extToMain(s, price) {
+    if (state.market !== 'us' || price == null || !isFinite(price)) return;
+    const ses = Feeds.etSession(Date.now()); if (ses === 'rth') return;
+    const base = ses === 'post' ? (prevRef[s] || closeRef[s]) : closeRef[s];
+    updateTickerRow(s, { last: price, changePct: base ? ((price - base) / base) * 100 : 0, ext: true }, false, !state.extHours);
+  }
+  function updateTickerRow(s, t, snapshot, quietAlert) {
+    if (snapshot && state.market === 'us' && Feeds.etSession(Date.now()) !== 'rth' && !t.ext) {
+      closeRef[s] = t.last; prevRef[s] = t.changePct > -100 ? t.last / (1 + t.changePct / 100) : null;
+      const q = extQ[s]; if (q && q.price != null) { tickers[s] = t; extToMain(s, q.price); return; }
+    }
     tickers[s] = t;
     for (const c of visibleCells()) if (!snapshot && c.symbol !== s && compares().includes(s)) c.chart.updateCompareLast(s, t.last);
-    onPrice(state.market, s, t.last, snapshot);
+    onPrice(state.market, s, t.last, snapshot || quietAlert);
     uiLater('tk' + s, () => renderTickerRow(s));
   }
   function renderTickerRow(s) {
@@ -889,7 +904,7 @@
   function extHtml(s) {
     const q = extShown(s) && extQ[s]; if (!q) return '';
     // 参考价用上面一行的常规时段价格（收盘后就是官方收盘价），两行对得上
-    const ref = (tickers[s] && tickers[s].last) || q.ref;
+    const ref = closeRef[s] != null ? closeRef[s] : (tickers[s] && !tickers[s].ext && tickers[s].last) || q.ref;
     const pct = q.price != null && ref ? ((q.price - ref) / ref) * 100 : null;
     const when = q.t ? new Date(q.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
     const tip = q.price == null ? `${EXT_LABEL[q.session]}还没有成交` : `${EXT_LABEL[q.session]}最新成交 ${when}，涨跌相对常规时段收盘 ${fmtPx(ref)}`;
@@ -912,14 +927,17 @@
     if (token !== tickerToken) return;
     const had = Object.keys(extQ).length;
     extQ = r.session === 'rth' ? {} : r.quotes; extNote = r.nightNote || '';
+    for (const [s, q] of Object.entries(extQ)) if (q.price != null && closeRef[s] != null) extToMain(s, q.price);
     if (had || Object.keys(extQ).length) renderWatchlist();
     renderExtNote();
   }
   function onExtTrade(s, x) {
-    const q = extQ[s]; if (!q || x.session === 'rth' || x.session === 'closed') return;
+    if (x.session === 'rth' || x.session === 'closed') return;
+    const q = extQ[s]; if (!q) { if (closeRef[s] != null) extToMain(s, x.price); return; }
     if (q.t && x.t < q.t) return;
     extQ[s] = { ...q, price: x.price, t: x.t, session: x.session, delayed: false };
     renderExtRow(s);
+    extToMain(s, x.price);
   }
   let unsubTickers = null, tickerToken = 0;
   async function startTickers() {
