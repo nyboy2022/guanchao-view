@@ -18,6 +18,14 @@ for BIN in \
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"; do
   if [ -x "$BIN" ]; then
     mkdir -p "$PROFILE"
+    # 上一次的程序窗口进程如果还在（可能已经卡住或没有窗口），先关掉再重新打开，保证打开的是最新版本
+    OLD="$(/usr/bin/pgrep -f -- "--user-data-dir=$PROFILE" | tr '\n' ' ')"
+    if [ -n "$OLD" ]; then
+      /usr/bin/pkill -f -- "--user-data-dir=$PROFILE"
+      for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/pgrep -f -- "--user-data-dir=$PROFILE" >/dev/null || break; sleep 0.3; done
+      /usr/bin/pkill -9 -f -- "--user-data-dir=$PROFILE" 2>/dev/null
+      echo "$(date '+%F %T') 关闭了旧的程序进程 $OLD" >> "$DIR/.launch.log" 2>/dev/null
+    fi
     "$BIN" --user-data-dir="$PROFILE" --no-first-run --no-default-browser-check \
       --app="$URL" --window-size=1440,900 >/dev/null 2>&1 &
     disown
