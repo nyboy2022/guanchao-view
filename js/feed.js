@@ -659,7 +659,10 @@
         const lt = snaps[sym] && snaps[sym].latestTrade;
         if (lt) {
           const tt = parseTs(lt.t), m = etInfo(tt).min;
-          if (tt > refT && !(m >= RTH_OPEN && m < RTH_CLOSE) && (!ext || tt > ext.t)) ext = { price: lt.p, t: tt, session: m < RTH_OPEN ? 'pre' : 'post', delayed: false };
+          const ls = etSession(tt);
+          // 夜盘成交（如 Tradier 推来的）只认最近 9 小时内的
+          if (tt > refT && !(m >= RTH_OPEN && m < RTH_CLOSE) && (!ext || tt > ext.t) && (ls !== 'night' || Date.now() - tt < 9 * 3600e3))
+            ext = { price: lt.p, t: tt, session: ls === 'night' && useTr() ? 'night' : m < RTH_OPEN ? 'pre' : 'post', delayed: false };
         }
         if (ref == null && snaps[sym] && !this.hasAlp()) { // 只有 Tradier：参考价用常规时段收盘（盘后）或昨收（盘前）
           const sn = snaps[sym]; ref = session === 'pre' || session === 'night' ? sn.trRef : (sn.trClose || sn.trRef);
@@ -682,7 +685,9 @@
             }
           } catch (e) { if (e.kind === 'auth') nightOk = false; }
         }
-        if (nightOk === false || !this.hasAlp()) out.nightNote = '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。';
+        const gotNight = Object.values(out.quotes).some((q) => q.session === 'night');
+        if (useTr() && !gotNight) out.nightNote = '夜盘（20:00–次日 04:00）：Tradier 现在没有夜盘成交数据，Alpaca 免费版也没有，这里显示的是盘后最后价格。';
+        else if (!gotNight && (nightOk === false || !this.hasAlp())) out.nightNote = '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。';
       }
       return out;
     },
