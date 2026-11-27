@@ -586,6 +586,15 @@
   const fmtPx = (v) => (v == null ? '—' : v.toFixed(ChartUtil.decimalsFor(v)));
   const fmtPct = (p) => (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
   const cellPrice = (c) => { const b = c.chart.bars[c.chart.bars.length - 1]; const t = tickers[c.symbol]; return b ? b.c : t && t.last; };
+  // 延迟 15 分钟的价格旁边放一个黄圈 D
+  const DLY_TIP = '延迟 15 分钟：这个价格来自全市场数据（Alpaca 免费版这时没有实时成交），比实际晚约 15 分钟';
+  const dlyHtml = (tip) => `<span class="dly" title="${esc(tip || DLY_TIP)}">D</span>`;
+  const chartDelayed = () => state.market === 'us' && !!(feed().chartDelayed && feed().chartDelayed());
+  function setDly(after, on) {
+    const nx = after.nextElementSibling, has = nx && nx.classList.contains('dly');
+    if (on && !has) after.insertAdjacentHTML('afterend', dlyHtml());
+    else if (!on && has) nx.remove();
+  }
   function renderCellHead(c) {
     const h = c.el.querySelector('.cell-head'), t = tickers[c.symbol], px = cellPrice(c);
     h.querySelector('.sym').textContent = c.symbol || '';
@@ -595,6 +604,7 @@
     ce.textContent = t ? fmtPct(t.changePct) : '';
     const cls = t ? (t.changePct >= 0 ? 'up' : 'down') : '';
     pe.className = 'px ' + cls; ce.className = 'chg ' + cls;
+    setDly(pe, chartDelayed() && px != null);
   }
   let flashTitle = false;
   function renderQuote() {
@@ -608,6 +618,7 @@
       ce.className = 'q-change ' + (t.changePct >= 0 ? 'up' : 'down');
       $('q-price').className = 'q-price ' + (t.changePct >= 0 ? 'up' : 'down');
     } else { ce.textContent = ''; $('q-price').className = 'q-price'; }
+    setDly($('q-price'), chartDelayed() && px != null);
     if (px != null) document.title = (flashTitle ? '🔔 ' : '') + `${s} ${fmtPx(px)} · 观潮看盘`;
   }
 
@@ -853,6 +864,8 @@
   }
   // ---------- 盘前 / 盘后 / 夜盘（只有美股）----------
   let extQ = {}, extNote = '', extTimer = null;
+  // 时段切换时（如 08:00、17:00）D 标记要跟着变
+  setInterval(() => { cells.forEach(renderCellHead); renderQuote(); }, 30e3);
   const EXT_LABEL = { pre: '盘前', post: '盘后', night: '夜盘' };
   const extShown = (s) => state.market === 'us' && !!extQ[s];
   function extHtml(s) {
@@ -862,7 +875,7 @@
     const pct = q.price != null && ref ? ((q.price - ref) / ref) * 100 : null;
     const when = q.t ? new Date(q.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
     const tip = q.price == null ? `${EXT_LABEL[q.session]}还没有成交` : `${EXT_LABEL[q.session]}最新成交 ${when}，涨跌相对常规时段收盘 ${fmtPx(ref)}`;
-    return `<span class="ext" title="${esc(tip)}"><i class="${q.session}">${EXT_LABEL[q.session]}</i>${q.price == null ? '—' : fmtPx(q.price)}` +
+    return `<span class="ext" title="${esc(tip)}"><i class="${q.session}">${EXT_LABEL[q.session]}</i>${q.price == null ? '—' : fmtPx(q.price)}${q.delayed && q.price != null ? dlyHtml() : ''}` +
       `<b class="${pct == null ? '' : pct >= 0 ? 'up' : 'down'}">${pct == null ? '' : fmtPct(pct)}</b></span>`;
   }
   function renderExtRow(s) {
@@ -887,7 +900,7 @@
   function onExtTrade(s, x) {
     const q = extQ[s]; if (!q || x.session === 'rth' || x.session === 'closed') return;
     if (q.t && x.t < q.t) return;
-    extQ[s] = { ...q, price: x.price, t: x.t, session: x.session };
+    extQ[s] = { ...q, price: x.price, t: x.t, session: x.session, delayed: false };
     renderExtRow(s);
   }
   let unsubTickers = null, tickerToken = 0;

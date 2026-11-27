@@ -304,3 +304,9 @@ kbd { display: inline-block; min-width: 16px; text-align: center; padding: 0 5px
 #settings { max-height: 92vh; overflow: auto; }
 #settings-form label.check { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
 #settings-form label.check input { width: auto; }
+
+/* 延迟 15 分钟标记 */
+.dly { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #f5c518; color: #1a1300;
+  font: 700 9px system-ui, sans-serif; line-height: 1; cursor: help; flex: none; vertical-align: middle; margin-left: 3px; }
+.quote .dly { width: 16px; height: 16px; font-size: 10px; margin-left: -2px; }
+.watchlist li .ext .dly { margin-left: 0; }

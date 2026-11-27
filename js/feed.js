@@ -301,6 +301,13 @@
     },
     setRthOnly(v) { alpCfg.rthOnly = !!v; },
     hasKey() { return !!(alpCfg.key && alpCfg.secret); },
+    // 图上最新价是不是延迟 15 分钟的数据：免费版开着盘前盘后时，IEX 只在 08:00–17:00 有成交，
+    // 04:00–08:00 和 17:00–20:00 图上最新的K线只能来自延迟的全市场数据
+    chartDelayed() {
+      if (alpCfg.feed === 'sip' || !sipHistoryOk || alpCfg.rthOnly || !this.hasKey()) return false;
+      const now = Date.now(), ses = etSession(now), m = etInfo(now).min;
+      return (ses === 'pre' && m < 480) || (ses === 'post' && m >= 1020);
+    },
     pause() { if (alpStream.paused) return; alpStream.paused = true; alpStream.sync(); },
     resume() { if (!alpStream.paused) return; alpStream.paused = false; alpStream.sync(); },
     normalizeSymbol(s) { return s.trim().toUpperCase().replace(/[^A-Z.]/g, ''); },
@@ -406,14 +413,16 @@
         for (const b of arr) {
           const m = etInfo(b.t).min;
           if (m >= RTH_OPEN && m < RTH_CLOSE) { ref = b.c; refT = b.t; ext = null; } // 新的常规时段开始，之前的盘前盘后作废
-          else if (m >= 240 && m < 1200) ext = { price: b.c, t: b.t + 5 * 60e3, session: m < RTH_OPEN ? 'pre' : 'post' };
+          else if (m >= 240 && m < 1200) ext = { price: b.c, t: b.t + 5 * 60e3, session: m < RTH_OPEN ? 'pre' : 'post', delayed: feed === 'sip' && alpCfg.feed !== 'sip' };
         }
         const lt = snaps[sym] && snaps[sym].latestTrade;
         if (lt) {
           const tt = parseTs(lt.t), m = etInfo(tt).min;
-          if (tt > refT && !(m >= RTH_OPEN && m < RTH_CLOSE) && (!ext || tt > ext.t)) ext = { price: lt.p, t: tt, session: m < RTH_OPEN ? 'pre' : 'post' };
+          if (tt > refT && !(m >= RTH_OPEN && m < RTH_CLOSE) && (!ext || tt > ext.t)) ext = { price: lt.p, t: tt, session: m < RTH_OPEN ? 'pre' : 'post', delayed: false };
         }
         // 盘前时段只显示今天的盘前；还没有盘前成交时显示上一个盘后
+        // 时段已经结束超过 15 分钟的价格是完整的，不算延迟
+        if (ext && ext.session !== session) ext.delayed = false;
         if (ext && ref != null) out.quotes[sym] = { ...ext, ref };
         else if (ref != null) out.quotes[sym] = { session: session === 'pre' ? 'pre' : 'post', price: null, t: 0, ref };
       }
@@ -425,7 +434,7 @@
             for (const sym of symbols) {
               const lt = j && j[sym] && j[sym].latestTrade; if (!lt || !out.quotes[sym]) continue;
               const tt = parseTs(lt.t); if (etSession(tt) !== 'night' || now - tt > 9 * 3600e3) continue;
-              out.quotes[sym] = { ...out.quotes[sym], session: 'night', price: lt.p, t: tt };
+              out.quotes[sym] = { ...out.quotes[sym], session: 'night', price: lt.p, t: tt, delayed: false };
             }
           } catch (e) { if (e.kind === 'auth') nightOk = false; }
         }
@@ -543,6 +552,7 @@
     return {
       id: 'sim', market: base.market, label: '演示数据（随机生成，非真实行情）', defaults: base.defaults,
       normalizeSymbol: base.normalizeSymbol.bind(base),
+      chartDelayed() { return base.market === 'us' && typeof window !== 'undefined' && !!window.__simDelayed; },
       async loadHistory(symbol, interval, endTime) {
         const bars = simBars(symbol, interval, endTime, 1000);
         if (!endTime) simState[symbol + interval] = bars[bars.length - 1];
@@ -556,7 +566,7 @@
       async extQuotes(symbols) {
         if (base.market !== 'us') return { session: 'rth', quotes: {} };
         const session = typeof window !== 'undefined' && window.__simSession || 'post', quotes = {};
-        for (const s of symbols) { const ref = seedPrice(s); quotes[s] = { session, price: ref * (1 + (s.length % 3 - 1) * 0.004), t: Date.now(), ref }; }
+        for (const s of symbols) { const ref = seedPrice(s); quotes[s] = { session, price: ref * (1 + (s.length % 3 - 1) * 0.004), t: Date.now(), ref, delayed: !!window.__simDelayed && session !== 'night' }; }
         return { session, quotes, nightNote: session === 'night' ? '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。' : '' };
       },
       async events(symbol, startMs) {
