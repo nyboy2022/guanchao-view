@@ -1,0 +1,28 @@
+#!/bin/bash
+# 观潮看盘：双击直接打开程序窗口，不出现终端
+APP="$(cd "$(dirname "$0")/../.." && pwd)"
+# 程序文件：先找 .app 旁边，找不到（比如 .app 被拖进了“应用程序”）就用固定位置
+DIR="$(dirname "$APP")"
+[ -f "$DIR/index.html" ] || DIR="$HOME/CLAUDE/观潮看盘"
+if [ ! -f "$DIR/index.html" ]; then
+  /usr/bin/osascript -e 'display alert "找不到观潮看盘的程序文件" message "请把 观潮看盘.app 放回程序文件夹里，和 index.html 放在一起。"' >/dev/null 2>&1
+  exit 1
+fi
+ENC="$(printf '%s' "$DIR/index.html" | /usr/bin/perl -pe 's/([^A-Za-z0-9\/._~-])/sprintf("%%%02X", ord($1))/ge')"
+URL="file://$ENC"
+PROFILE="$HOME/Library/Application Support/GuanChao"
+for BIN in \
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"; do
+  if [ -x "$BIN" ]; then
+    mkdir -p "$PROFILE"
+    "$BIN" --user-data-dir="$PROFILE" --no-first-run --no-default-browser-check \
+      --app="$URL" --window-size=1440,900 >/dev/null 2>&1 &
+    disown
+    echo "$(date '+%F %T') 启动 $(basename "$BIN") pid=$! 父进程=$(ps -o comm= -p $PPID)" >> "$DIR/.launch.log" 2>/dev/null
+    exit 0
+  fi
+done
+open "$DIR/index.html"

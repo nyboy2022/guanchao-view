@@ -1,0 +1,8 @@
+# 本地运行产生的文件
+.launch.log
+.DS_Store
+Thumbs.db
+*.zip
+# 不要提交任何密钥或本地配置
+.env
+*.local.json

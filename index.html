@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>观潮看盘</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M2 15c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3" fill="none" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round"/><path d="M2 19c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3" fill="none" stroke="#4fd1c5" stroke-opacity=".45" stroke-width="2" stroke-linecap="round"/><path d="M6 9l4-4 3 3 5-5" fill="none" stroke="#ffb547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>观潮看盘</span>
+  </div>
+  <div class="seg" id="market">
+    <button data-m="crypto">加密货币</button><button data-m="us">美股</button>
+  </div>
+  <div class="quote">
+    <span id="q-symbol" class="q-symbol">—</span>
+    <span id="q-price" class="q-price">—</span>
+    <span id="q-change" class="q-change"></span>
+  </div>
+  <div class="intervals" id="intervals"></div>
+  <select id="ctype" class="ctype" title="K线样式">
+    <option value="candle">蜡烛</option><option value="hollow">空心</option><option value="ha">平均K线</option><option value="line">折线</option><option value="area">面积</option>
+  </select>
+  <div class="intervals" id="layout" title="同时显示几个图"></div>
+  <button class="btn toggle" id="sync-btn" title="多图联动：鼠标位置（十字线）和缩放、平移在所有图上同步" hidden>🔗</button>
+  <div class="menu" id="lay-menu">
+    <button class="btn" id="lay-btn" title="保存、切换布局（几个图、各图的品种、周期、指标、K线样式、对比）">▦ 布局</button>
+    <div class="dropdown" id="lay-panel"></div>
+  </div>
+  <div class="menu" id="ind-menu">
+    <button class="btn" id="ind-btn">指标 ▾</button>
+    <div class="dropdown" id="ind-list"></div>
+  </div>
+  <div class="menu" id="alert-menu">
+    <button class="btn" id="alert-btn" title="价格警报">🔔 警报<b id="alert-count" class="badge" hidden></b></button>
+    <div class="dropdown" id="alert-panel"></div>
+  </div>
+  <button class="btn toggle" id="ext-btn" title="美股：K线是否包含盘前盘后（04:00–09:30、16:00–20:00 美东时间）的成交。关闭时只显示常规交易时段（多数看盘软件的默认做法）">盘前盘后</button>
+  <div class="spacer"></div>
+  <div class="status" id="status"><i></i><span>连接中</span></div>
+  <button class="btn" id="settings-btn" title="设置：美股 API Key、财报 Key">⚙</button>
+</header>
+
+<dialog id="settings">
+  <form method="dialog" id="settings-form">
+    <h3>美股数据：Alpaca API Key</h3>
+    <p class="hint">在 alpaca.markets 免费注册后，在控制台生成 API Key。Key 只保存在你这台电脑的浏览器里，不会上传到别处。</p>
+    <label>API Key ID<input name="key" autocomplete="off" spellcheck="false"></label>
+    <label>Secret Key<input name="secret" type="password" autocomplete="off" spellcheck="false"></label>
+    <label>数据范围
+      <select name="feed">
+        <option value="iex">IEX（免费）：只有 IEX 交易所的成交</option>
+        <option value="sip">SIP（需付费套餐）：全美所有交易所</option>
+      </select>
+    </label>
+    <h3>财报日（可选）：Alpha Vantage Key</h3>
+    <p class="hint">分红和拆股直接用上面的 Alpaca Key，不用另外设置。财报日 Alpaca 不提供，需要在 alphavantage.co 免费申请一个 Key（每天 25 次查询，程序会把每只股票的结果存 3 天）。不填就只显示分红和拆股。</p>
+    <label>Alpha Vantage Key<input name="avkey" autocomplete="off" spellcheck="false"></label>
+    <div class="row"><button class="btn" value="cancel" formnovalidate>取消</button><button class="btn primary" value="save">保存</button></div>
+  </form>
+</dialog>
+
+<dialog id="screener">
+  <h3>筛选器</h3>
+  <p class="hint" id="sc-status"></p>
+  <div class="sc-row">范围
+    <select id="sc-scope"><option value="list">当前自选列表</option><option value="all">本市场所有列表</option><option value="custom">自己输入代码</option></select>
+    <input id="sc-custom" placeholder="用逗号或空格隔开，如 AAPL, MSFT" hidden>
+  </div>
+  <div class="sc-conds">
+    <label><input type="checkbox" id="sc-up" checked>今日涨幅 ≥ <input id="sc-up-v" type="number" value="3" step="0.5">%</label>
+    <label><input type="checkbox" id="sc-dn">今日跌幅 ≥ <input id="sc-dn-v" type="number" value="3" step="0.5">%</label>
+    <label><input type="checkbox" id="sc-vol">放量：成交量 ≥ <input id="sc-vol-v" type="number" value="2" step="0.1"> 倍 20 日均量</label>
+    <label><input type="checkbox" id="sc-above">收盘价在 MA<input id="sc-above-v" type="number" value="50"> 之上</label>
+    <label><input type="checkbox" id="sc-below">收盘价在 MA<input id="sc-below-v" type="number" value="50"> 之下</label>
+    <label><input type="checkbox" id="sc-cross">最近 <input id="sc-cross-d" type="number" value="3"> 天内向上突破 MA<input id="sc-cross-v" type="number" value="20"></label>
+    <label><input type="checkbox" id="sc-high">创 <input id="sc-high-v" type="number" value="20"> 日新高</label>
+    <label><input type="checkbox" id="sc-low">创 <input id="sc-low-v" type="number" value="20"> 日新低</label>
+    <label><input type="checkbox" id="sc-rsihi">RSI(14) ≥ <input id="sc-rsihi-v" type="number" value="70"></label>
+    <label><input type="checkbox" id="sc-rsilo">RSI(14) ≤ <input id="sc-rsilo-v" type="number" value="30"></label>
+  </div>
+  <div class="sc-row">勾选的条件
+    <select id="sc-mode"><option value="all">全部满足</option><option value="any">满足任意一个</option></select>
+    <button class="btn primary" id="sc-run">开始扫描</button>
+  </div>
+  <div class="sc-table"><table>
+    <thead><tr><th>代码</th><th>最新价</th><th>涨跌幅</th><th>量比</th><th>RSI</th><th>符合</th></tr></thead>
+    <tbody id="sc-results"></tbody>
+  </table></div>
+  <form method="dialog" class="row"><button class="btn" id="sc-save" type="button" disabled>结果存为新列表</button><button class="btn">关闭</button></form>
+</dialog>
+
+<div class="banner" id="banner" hidden></div>
+<div class="toasts" id="toasts"></div>
+
+<main class="body">
+  <nav class="tools" id="tools">
+    <button data-tool="cursor" class="on" title="光标 / 平移 (Esc)">
+      <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg></button>
+    <button data-tool="trend" title="趋势线">
+      <svg viewBox="0 0 24 24"><path d="M4 19L20 5"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="5" r="2"/></svg></button>
+    <button data-tool="ray" title="射线（从起点穿过第二个点一直向右延伸）">
+      <svg viewBox="0 0 24 24"><path d="M4 18L21 6"/><circle cx="4" cy="18" r="2"/><circle cx="11" cy="13" r="1.6"/></svg></button>
+    <button data-tool="hline" title="水平线">
+      <svg viewBox="0 0 24 24"><path d="M3 12h18"/><circle cx="12" cy="12" r="2"/></svg></button>
+    <button data-tool="channel" title="平行通道：先画主线（两点），再移动鼠标定通道宽度，点一下完成">
+      <svg viewBox="0 0 24 24"><path d="M3 15L15 4M9 20L21 9"/></svg></button>
+    <button data-tool="rect" title="矩形区域">
+      <svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+    <button data-tool="fib" title="斐波那契回撤">
+      <svg viewBox="0 0 24 24"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /></svg></button>
+    <button data-tool="fibext" title="斐波那契扩展：依次点 A（起点）、B（终点）、C（回调点），得到目标位 0.618 / 1 / 1.618 / 2.618">
+      <svg viewBox="0 0 24 24"><path d="M3 20l6-12 4 6"/><path d="M14 4h7M14 8h7M14 12h7" stroke-dasharray="2 2"/></svg></button>
+    <button data-tool="text" title="文字标注：点一下放置，双击可以修改">
+      <svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></button>
+    <button data-tool="measure" title="测量：拖一下，显示涨跌幅、K线根数和时间">
+      <svg viewBox="0 0 24 24"><path d="M4 20L20 4M4 20h6M4 20v-6M20 4h-6M20 4v6"/></svg></button>
+    <hr>
+    <button id="latest-btn" title="回到最新K线并重置缩放">
+      <svg viewBox="0 0 24 24"><path d="M5 12h12M13 7l5 5-5 5M20 5v14"/></svg></button>
+    <button id="alert-line" title="给选中的画线（水平线 / 趋势线）设警报：价格穿过这条线时提醒">
+      <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></button>
+    <button id="del-sel" title="删除选中的画线 (Delete)">
+      <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg></button>
+    <button id="del-all" title="清空本品种所有画线">
+      <svg viewBox="0 0 24 24"><path d="M4 4l16 16M20 4L4 20"/></svg></button>
+  </nav>
+
+  <section class="chart" id="chart"></section>
+
+  <aside class="side">
+    <div class="side-head">
+      <select id="list-sel" title="切换自选列表"></select>
+      <div class="side-acts">
+        <button id="sc-btn" title="筛选器：按涨跌幅、放量、均线、新高新低、RSI 扫描">🔍</button><button id="list-new" title="新建列表">＋</button><button id="list-ren" title="重命名这个列表">✎</button><button id="list-del" title="删除这个列表">🗑</button>
+      </div>
+    </div>
+    <div class="side-add">
+      <form id="add-form"><input id="add-input" placeholder="添加代码" autocomplete="off" spellcheck="false"><button class="btn">+</button></form>
+      <button class="btn" id="sec-new" title="新建板块（分组）">＋板块</button>
+    </div>
+    <div class="wl-cols"><span>品种</span><span>最新价</span><span>24h涨跌</span></div>
+    <ul class="watchlist" id="watchlist"></ul>
+    <div class="side-foot"><div id="ext-note" hidden></div><div class="hint-drag">拖动可以排序，也可以把股票拖进别的板块</div><div id="source-note"></div></div>
+  </aside>
+</main>
+
+<script src="js/indicators.js"></script>
+<script src="js/feed.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
