@@ -804,6 +804,9 @@
       out.push({ t: end - i * ms, o, h, l, c, v: 50 + rnd() * 500 });
       p = c;
     }
+    // 整体缩放到最后收盘价 = 起始价：各周期、自选报价、对比线都从同一个价格接着走，对得上
+    const k = seedPrice(sym) / p;
+    for (const b of out) { b.o *= k; b.h *= k; b.l *= k; b.c *= k; }
     return out;
   }
   function makeSim(base) {
