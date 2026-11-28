@@ -7,6 +7,8 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 ENC="$(printf '%s' "$DIR/index.html" | /usr/bin/perl -pe 's/([^A-Za-z0-9\/._~-])/sprintf("%%%02X", ord($1))/ge')"
 URL="file://$ENC"
 PROFILE="$HOME/Library/Application Support/GuanChao"
+# 记下程序文件夹的位置：观潮看盘.app 被挪走后也能找到
+mkdir -p "$PROFILE" && printf '%s' "$DIR" > "$PROFILE/app-dir"
 for BIN in \
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \

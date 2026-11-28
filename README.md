@@ -104,7 +104,19 @@ js/lang-en.js       英文界面文字（以中文原文为键）
 js/chart.js         K线图引擎（Canvas 绘制、画线、交互、联动）
 js/indicators.js    技术指标计算
 js/feed.js          数据源（OKX、Alpaca、Tradier、Alpha Vantage、演示数据），统一接口
-js/app.js           界面逻辑（多图、自选、警报、布局、筛选器、右键菜单）
+js/app/              界面逻辑，按功能分文件，按 index.html 里的顺序加载：
+  core.js           常量、本地保存、主题和语言按钮
+  charts.js         多图、市场、周期、布局、对比、财报标记
+  panels.js         指标面板、画线工具、快捷键、代码框
+  settings.js       设置、备份、状态栏
+  data.js           报价显示、K线加载
+  watchlist.js      自选列表、实时报价订阅、盘前盘后
+  alerts.js         警报和推送
+  screener.js       筛选器
+  layouts.js        多窗口、布局保存
+  context-menu.js   右键菜单
+  main.js           启动
+tests/              单元测试（指标计算、美东时间、订阅上限）
 观潮看盘.app         Mac 启动器（shell 脚本打包的 .app）
 Start-Mac.command   Mac 启动脚本（会显示终端）
 Start-Windows.bat   Windows 启动脚本
@@ -113,6 +125,12 @@ Start-Windows.bat   Windows 启动脚本
 详细的操作说明见 [docs/使用说明.md](docs/使用说明.md)。
 
 项目没有任何依赖，也没有构建步骤。改完代码后刷新页面就能看到效果。
+
+运行测试（需要 Node.js 18 以上，不用安装任何包）：
+
+```bash
+node --test
+```
 
 ## 免责声明
 

@@ -1,16 +1,30 @@
 #!/bin/bash
 # 观潮看盘：双击直接打开程序窗口，不出现终端
 APP="$(cd "$(dirname "$0")/../.." && pwd)"
-# 程序文件：先找 .app 旁边，找不到（比如 .app 被拖进了“应用程序”）就用固定位置
+# 程序文件在哪：
+#   1. .app 旁边（正常情况）；找到后记下来
+#   2. 上次记下的位置（比如 .app 被拖进了“应用程序”文件夹）
+#   3. 都找不到：弹窗让你选一次程序文件夹，以后就记住了
+PROFILE="$HOME/Library/Application Support/GuanChao"
+REMEMBER="$PROFILE/app-dir"
+mkdir -p "$PROFILE"
 DIR="$(dirname "$APP")"
-[ -f "$DIR/index.html" ] || DIR="$HOME/CLAUDE/观潮看盘"
+if [ -f "$DIR/index.html" ]; then
+  printf '%s' "$DIR" > "$REMEMBER"
+else
+  DIR="$(cat "$REMEMBER" 2>/dev/null)"
+fi
 if [ ! -f "$DIR/index.html" ]; then
-  /usr/bin/osascript -e 'display alert "找不到观潮看盘的程序文件" message "请把 观潮看盘.app 放回 观潮看盘 文件夹里，或者确认文件夹在 ~/CLAUDE/观潮看盘。"' >/dev/null 2>&1
-  exit 1
+  DIR="$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "找不到观潮看盘的程序文件，请选择「观潮看盘」文件夹（里面有 index.html）")' 2>/dev/null)"
+  DIR="${DIR%/}"
+  if [ -z "$DIR" ] || [ ! -f "$DIR/index.html" ]; then
+    [ -n "$DIR" ] && /usr/bin/osascript -e 'display alert "这个文件夹里没有 index.html" message "请选择解压出来的「观潮看盘」文件夹。"' >/dev/null 2>&1
+    exit 1
+  fi
+  printf '%s' "$DIR" > "$REMEMBER"
 fi
 ENC="$(printf '%s' "$DIR/index.html" | /usr/bin/perl -pe 's/([^A-Za-z0-9\/._~-])/sprintf("%%%02X", ord($1))/ge')"
 URL="file://$ENC"
-PROFILE="$HOME/Library/Application Support/GuanChao"
 for BIN in \
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \

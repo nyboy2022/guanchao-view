@@ -170,7 +170,16 @@
   const alpStream = {
     sock: null, authed: false, stats: { n: 0, last: null, src: 'Alpaca IEX' }, subscribed: new Set(), listeners: new Set(), statusCbs: new Set(), status: 'idle',
     setStatus(s) { this.status = s; this.statusCbs.forEach((f) => f(s)); },
-    wanted() { const w = new Set(); this.listeners.forEach((l) => l.symbols.forEach((s) => w.add(s))); return w; },
+    // 免费版（IEX）一条连接最多订阅 30 只：按优先级取（K线 > 自选报价，自选里按传进来的顺序），多出来的记在 dropped
+    cap: 30, dropped: [], capCbs: new Set(),
+    wanted() {
+      const all = [];
+      [...this.listeners].sort((a, b) => a.prio - b.prio).forEach((l) => l.symbols.forEach((s) => all.push(s)));
+      const uniq = [...new Set(all)], limit = alpCfg.feed === 'iex' ? this.cap : Infinity;
+      const dropped = uniq.slice(limit);
+      if (dropped.join() !== this.dropped.join()) { this.dropped = dropped; this.capCbs.forEach((f) => f(dropped)); }
+      return new Set(uniq.slice(0, limit));
+    },
     sync() {
       if (this.paused) { if (this.sock) { this.sock.close(); this.sock = null; this.authed = false; this.subscribed.clear(); } return; }
       const want = this.wanted();
@@ -214,8 +223,8 @@
         },
       });
     },
-    add(symbols, fn, statusCb) {
-      const l = { symbols: new Set(symbols), fn };
+    add(symbols, fn, statusCb, prio = 0) {
+      const l = { symbols: new Set(symbols), fn, prio };
       this.listeners.add(l); if (statusCb) { this.statusCbs.add(statusCb); statusCb(this.status === 'idle' ? 'connecting' : this.status); }
       this.sync();
       return () => { this.listeners.delete(l); if (statusCb) this.statusCbs.delete(statusCb); this.sync(); };
@@ -306,6 +315,27 @@
     const [y, m, d] = ymd.split('-').map(Number);
     for (const h of [4, 5]) { const t = Date.UTC(y, m - 1, d, h); if (etInfo(t).min === 0) return t; }
     return Date.UTC(y, m - 1, d, 5);
+  }
+  // 日 / 周 / 月线在美东日历上的起点和收盘时间（夏令时切换前后都对得上历史K线）
+  function etDayShift(ymd, k) { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + k)).toISOString().slice(0, 10); }
+  function etBarStart(t, interval) {
+    const e = etInfo(t);
+    if (interval === '1d') return etMidnight(e.date);
+    if (interval === '1w') return etMidnight(etDayShift(e.date, -((WD[e.wd] + 6) % 7))); // 周一
+    if (interval === '1M') return etMidnight(e.date.slice(0, 8) + '01');
+    return null;
+  }
+  // 一根日 / 周 / 月线的收盘（常规时段 16:00）：日线当天、周线周五、月线当月最后一个工作日（不考虑节假日）
+  function etBarClose(t, ms) {
+    if (ms < 86400e3) return t + ms;
+    const day = etInfo(t + 12 * 3600e3).date; // K线起点那天（美东）
+    let last = day;
+    if (ms >= 25 * 86400e3) {
+      const [y, m] = day.split('-').map(Number);
+      last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+      for (let k = 0; k < 3; k++) { const wd = new Date(last + 'T12:00:00Z').getUTCDay(); if (wd >= 1 && wd <= 5) break; last = etDayShift(last, -1); }
+    } else if (ms >= 6 * 86400e3) last = etDayShift(day, 4);
+    return etMidnight(last) + RTH_CLOSE * 60e3;
   }
   async function trQuotes(symbols) {
     const out = {};
@@ -465,6 +495,9 @@
     },
     usingTradier() { return useTr(); },
     streamStats() { const st = liveStream(); return { ...st.stats, subs: st.wanted().size, status: st.status }; },
+    // 超过免费版 30 只上限时，没订阅上的品种：fn(dropped[])；app 会定时用快照补它们的价格
+    onSymbolCap(fn) { alpStream.capCbs.add(fn); return () => alpStream.capCbs.delete(fn); },
+    droppedSymbols() { return useTr() ? [] : alpStream.dropped.slice(); },
     // 设置里的「测试」按钮：用填的 Token 查一次 AAPL 报价和今天的分钟K线
     async testTradier(token) {
       const old = trCfg.token; trCfg.token = token;
@@ -752,12 +785,12 @@
       let cur = lastBar ? { ...lastBar } : null;
       return liveStream().add([symbol], (tr) => {
         if (alpCfg.rthOnly && !tradeInRth(tr.t)) return; // 只看常规时段时，盘前盘后的成交不计入
-        if (!cur) cur = { t: Math.floor(tr.t / ms) * ms, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
+        const cal = ms >= 86400e3; // 日 / 周 / 月线按美东日历切，不能用固定步长（夏令时那周会差 1 小时）
+        if (!cur) cur = { t: cal ? etBarStart(tr.t, interval) : Math.floor(tr.t / ms) * ms, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
         if (tr.t < cur.t) return;
-        if (interval === '1M') {
-          // 月线：按美东日历月判断是否进入新的一根
-          const a = etInfo(tr.t).date.slice(0, 7), b = etInfo(cur.t + 86400e3).date.slice(0, 7);
-          if (a !== b) cur = { t: tr.t, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
+        if (cal) {
+          const t0 = etBarStart(tr.t, interval);
+          if (t0 > cur.t) cur = { t: t0, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
         } else if (tr.t >= cur.t + ms) {
           const t = cur.t + Math.floor((tr.t - cur.t) / ms) * ms; // 与历史K线同一时间网格
           cur = { t, o: tr.p, h: tr.p, l: tr.p, c: tr.p, v: 0 };
@@ -773,7 +806,7 @@
         if (!tradeInRth(tr.t)) { if (onExt) onExt(tr.sym, { price: tr.p, t: tr.t, session: etSession(tr.t) }); return; }
         const pc = prevClose[tr.sym];
         onTicker(tr.sym, { last: tr.p, changePct: pc ? ((tr.p - pc) / pc) * 100 : 0 });
-      });
+      }, null, 1);
     },
   };
 
@@ -867,5 +900,5 @@
     };
   }
 
-  global.Feeds = { OkxFeed, AlpacaFeed, makeSim, INTERVAL_MS, FeedError, etInfo, etSession };
+  global.Feeds = { OkxFeed, AlpacaFeed, makeSim, INTERVAL_MS, FeedError, etInfo, etSession, etBarStart, etBarClose };
 })(window);

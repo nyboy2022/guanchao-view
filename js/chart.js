@@ -24,7 +24,21 @@
   };
   const C = { ...THEMES.dark, ...(global.Prefs ? THEMES[global.Prefs.theme] : null) };
   const charts = new Set();
+  // 浅色主题里，浅黄、白色这类颜色在白底上看不清：自动加深到对比度至少 3:1（用户选的颜色本身不改）
+  let themeName = 'dark';
+  const inkCache = new Map();
+  function ink(col) {
+    if (themeName !== 'light' || typeof col !== 'string' || col[0] !== '#') return col;
+    let v = inkCache.get(col); if (v) return v;
+    let hex = col.slice(1); if (hex.length === 3) hex = hex.replace(/./g, (x) => x + x);
+    let [r, g, b] = [0, 2, 4].map((k) => parseInt(hex.slice(k, k + 2), 16));
+    const lum = (r, g, b) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    for (let k = 0; k < 20 && 1.05 / (lum(r, g, b) + 0.05) < 3; k++) { r *= 0.9; g *= 0.9; b *= 0.9; }
+    v = '#' + [r, g, b].map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
+    inkCache.set(col, v); return v;
+  }
   function setTheme(name) {
+    themeName = name === 'light' ? 'light' : 'dark';
     Object.assign(C, THEMES[name] || THEMES.dark);
     // 十字线标签底色在浅色主题里是深色块，上面的字要用白色
     C.labelText = name === 'light' ? '#ffffff' : C.text;
@@ -58,8 +72,11 @@
     return v.toPrecision(3);
   }
   const pad2 = (n) => String(n).padStart(2, '0');
+  // 日线及以上：按当天中午取日期。美股日线在美东 0 点、币在 UTC 0 点，
+  // 直接按本地时区显示的话，美国西部会显示成前一天，这样各时区都显示同一个日期
+  const dayOf = (t, ms) => new Date(ms >= 86400e3 ? t + 12 * 3600e3 : t);
   function fmtTime(t, ms, full) {
-    const d = new Date(t);
+    const d = dayOf(t, ms);
     const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
     if (full) return ms >= 86400e3 ? date : `${date} ${hm}`;
@@ -205,6 +222,7 @@
     _overlays() { return this.ind.filter((x) => Indicators.TYPES[x.inst.type].kind === 'overlay'); }
     _overlayLines() { const r = []; for (const x of this._overlays()) r.push(...x.out.lines); return r; }
     setSessionKey(fn) { this.sessionKey = fn; }
+    setBarClose(fn) { this.barClose = fn || null; this.dirty = true; }
     setAlerts(list) { this.alerts = list || []; this.dirty = true; }
     // 财报 / 分红 / 拆股标记：[{t, kind:'earn'|'div'|'split', title, detail, beat}]
     setEvents(list) { this.events = list || []; this.dirty = true; }
@@ -383,10 +401,12 @@
       ctx.save(); ctx.beginPath(); ctx.rect(0, main.top, plotW, main.h); ctx.clip();
       this._drawPriceGrid(main, S, plotW);
       if (!this.ind.some((x) => x.inst.type === 'vol')) this._drawVolume(main, i0, i1, plotW); // 有成交量副图时，主图不再叠加
+      this._poc = null;
       if (this.vprofile) this._drawVolumeProfile(main, S, i0, i1, plotW);
       this._drawMain(S, i0, i1, plotW);
       for (const ln of this._cmp) this._drawLine(ln.data, S, i0, i1, plotW, ln.color, [6, 3]);
       for (const ln of this._overlayLines()) this._drawLine(ln.data, S, i0, i1, plotW, ln.color, ln.dash, ln.style);
+      this._drawPocLabel();
       this._drawAlerts(S, plotW);
       this._drawDrawings(S, plotW);
       this._drawEvents(main, plotW);
@@ -527,8 +547,15 @@
       }
       const yp = S.y(lo + (poc + 0.5) * step);
       ctx.strokeStyle = 'rgba(255,181,71,0.7)'; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(plotW, yp); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = '#ffb547'; ctx.font = '10px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-      ctx.fillText(_t('POC 成交最密集'), plotW - W - 6, yp - 2);
+      this._poc = { x: plotW - W - 6, y: yp }; // 文字等K线画完再写，避免被K线挡住
+    }
+    _drawPocLabel() {
+      const p = this._poc; if (!p) return;
+      const ctx = this.ctx, t = _t('POC 成交最密集');
+      ctx.font = '10px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      const w = ctx.measureText(t).width;
+      ctx.fillStyle = C.legendBg; ctx.fillRect(p.x - w - 4, p.y - 15, w + 8, 13);
+      ctx.fillStyle = ink('#ffb547'); ctx.fillText(t, p.x, p.y - 3);
     }
     _drawCandles(S, i0, i1, plotW, B) {
       B = B || this.bars;
@@ -564,7 +591,7 @@
       }
     }
     _drawLine(data, S, i0, i1, plotW, color, dash, style) {
-      const ctx = this.ctx;
+      const ctx = this.ctx; color = ink(color);
       if (style === 'dots') {
         ctx.fillStyle = color; const r = Math.max(1.2, Math.min(2.5, this.spacing * 0.22));
         ctx.beginPath();
@@ -591,11 +618,13 @@
       ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.beginPath();
       ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(plotW, Math.round(y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
       // 价格标签 + 收盘倒计时
+      // 收盘时间：外面可以指定（美股日线 = 美东 16:00），返回 null 表示这根已经收盘
       let next = last.t + this.intervalMs;
       if (this.intervalMs > 25 * 86400e3) { const d = new Date(last.t); next = new Date(d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()).getTime(); }
-      const remain = Math.max(0, next - Date.now());
+      if (this.barClose) next = this.barClose(last.t, this.intervalMs);
+      const remain = next == null ? 0 : Math.max(0, next - Date.now());
       const s = Math.floor(remain / 1000);
-      const cd = s >= 86400 ? `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`
+      const cd = next == null || (this.barClose && remain <= 0) ? _t('已收盘') : s >= 86400 ? `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`
         : s >= 3600 ? `${Math.floor(s / 3600)}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}` : `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
       ctx.fillStyle = col; ctx.fillRect(plotW, y - 9, AXIS_W, 32);
       ctx.fillStyle = '#fff'; ctx.font = '600 11px ui-monospace, Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -655,7 +684,7 @@
       const put = (t, col) => {
         const w = ctx.measureText(t).width;
         ctx.fillStyle = C.legendBg; ctx.fillRect(x - 3, pane.top + 4, w + 8, 15);
-        ctx.fillStyle = col; ctx.fillText(t, x, pane.top + 6); x += w + 10;
+        ctx.fillStyle = ink(col); ctx.fillText(t, x, pane.top + 6); x += w + 10;
       };
       put(Indicators.label(inst), C.axis);
       if (hist && hist.mode === 'bar') { const b = this.bars[idx]; put(hist.label + ' ' + (b ? fmtVol(b.v) : '-'), b && b.c >= b.o ? C.up : C.down); }
@@ -671,7 +700,7 @@
       const start = Math.floor(this.indexAtX(0, plotW) / step) * step;
       for (let i = start; i <= this.rightIndex; i += step) {
         const x = this.xOf(i, plotW); if (x < 20 || x > plotW - 20) continue;
-        const t = this.indexToTime(i), d = new Date(t);
+        const t = this.indexToTime(i), d = dayOf(t, this.intervalMs);
         let label = fmtTime(t, this.intervalMs, false);
         if (this.intervalMs < 86400e3 && d.getHours() === 0 && d.getMinutes() === 0) label = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
         if (this.intervalMs >= 86400e3 && d.getMonth() === 0 && d.getDate() <= 7) label = String(d.getFullYear());
@@ -733,7 +762,7 @@
         const w = ctx.measureText(t).width;
         if (x > 8 && x + w > maxX) { x = 8; y += 17; }
         ctx.fillStyle = C.legendBg; ctx.fillRect(x - 3, y - 2, w + gap, 16);
-        ctx.fillStyle = c; ctx.fillText(t, x, y); x += w + gap;
+        ctx.fillStyle = ink(c); ctx.fillText(t, x, y); x += w + gap;
       };
       // 多图时格子较小：平时只显示收盘价，鼠标移上来才显示完整数值
       const compact = this.w < 560, hovering = !!this.mouse || this.syncT != null;
@@ -769,7 +798,7 @@
       this._boxes = {};
       for (const d of list) {
         const sel = d.id === this.selectedId || d === this.pending;
-        ctx.strokeStyle = sel ? C.drawSel : (d.color || C.draw); ctx.lineWidth = sel ? 1.6 : 1.3;
+        ctx.strokeStyle = sel ? C.drawSel : ink(d.color || C.draw); ctx.lineWidth = sel ? 1.6 : 1.3;
         ctx.fillStyle = ctx.strokeStyle;
         const handles = [];
         const line = (a, b) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
@@ -785,7 +814,7 @@
           ctx.fillStyle = sel ? 'rgba(255,181,71,0.25)' : C.noteBg;
           ctx.fillRect(a.x, a.y - h / 2, w, h);
           ctx.strokeRect(a.x + 0.5, a.y - h / 2 + 0.5, w, h);
-          ctx.fillStyle = d.color || C.draw;
+          ctx.fillStyle = ink(d.color || C.draw);
           lines.forEach((t, k) => ctx.fillText(t, a.x + 6, a.y - h / 2 + 3 + 8.5 + k * 17));
           this._boxes[d.id] = { x0: a.x, y0: a.y - h / 2, x1: a.x + w, y1: a.y + h / 2 };
           handles.push(a);

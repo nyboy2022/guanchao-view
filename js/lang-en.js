@@ -473,4 +473,12 @@ window.I18N_EN = {
   "主题：浅色": "Theme: light",
   "主题：深色": "Theme: dark",
   "切换为 English": "Switch to 中文",
+  "已收盘": "Closed",
+  "超过 30 只的部分改为定时刷新": "Stocks beyond 30 now refresh periodically",
+  "Alpaca 免费版同时最多实时订阅 30 只股票。这 {0} 只改为每 30 秒刷新一次：{1}": "Alpaca's free plan streams at most 30 stocks at once. These {0} now refresh every 30 seconds: {1}",
+  "清除这台电脑上保存的所有 API Key、Token 和推送地址？清除后需要重新填写。": "Clear all API keys, tokens and push addresses saved on this computer? You'll need to enter them again.",
+  "Key 的保存": "Storing keys",
+  "Key 只存在这台电脑的浏览器配置里。双击「观潮看盘」打开时用的是单独的配置文件夹，和你平时的浏览器分开。同一个浏览器里打开的其它本地网页文件（file://）能读到这些设置，所以不要在里面打开来历不明的 .html 文件；和别人共用电脑的话，可以关掉下面的「记住」。": "Keys are stored only in this computer's browser profile. Opening GuanChao by double-click uses its own profile folder, separate from your everyday browser. Other local web files (file://) opened in the same browser can read these settings, so don't open unknown .html files there. On a shared computer, turn off \"Remember\" below.",
+  "在这台电脑上记住 Key 和推送地址（关掉的话，每次打开程序都要重新填）": "Remember keys and push addresses on this computer (if off, you'll enter them each time you open the app)",
+  "清除已保存的 Key…": "Clear saved keys…",
 };

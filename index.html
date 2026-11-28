@@ -75,6 +75,10 @@
     <h3>财报日（可选）：Alpha Vantage Key</h3>
     <p class="hint">分红和拆股直接用上面的 Alpaca Key，不用另外设置。财报日 Alpaca 不提供，需要在 alphavantage.co 免费申请一个 Key（每天 25 次查询，程序会把每只股票的结果存 3 天）。不填就只显示分红和拆股。</p>
     <label>Alpha Vantage Key<input name="avkey" autocomplete="off" spellcheck="false"></label>
+    <h3>Key 的保存</h3>
+    <p class="hint">Key 只存在这台电脑的浏览器配置里。双击「观潮看盘」打开时用的是单独的配置文件夹，和你平时的浏览器分开。同一个浏览器里打开的其它本地网页文件（file://）能读到这些设置，所以不要在里面打开来历不明的 .html 文件；和别人共用电脑的话，可以关掉下面的「记住」。</p>
+    <label class="check"><input type="checkbox" name="remember" checked>在这台电脑上记住 Key 和推送地址（关掉的话，每次打开程序都要重新填）</label>
+    <div class="row left"><button type="button" class="btn" id="keys-clear">清除已保存的 Key…</button></div>
     <h3>备份</h3>
     <p class="hint">把自选列表、画线、布局、警报、指标和其它设置存成一个文件，换电脑或重装时导入就能恢复。导入会替换现在的这些内容。</p>
     <label class="check"><input type="checkbox" id="bk-keys">备份里包含 API Key 和推送地址（文件要自己保管好，不要发给别人）</label>
@@ -216,6 +220,17 @@
 <script src="js/indicators.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/chart.js"></script>
-<script src="js/app.js"></script>
+<!-- 应用层按顺序加载，main.js 最后启动 -->
+<script src="js/app/core.js"></script>
+<script src="js/app/charts.js"></script>
+<script src="js/app/panels.js"></script>
+<script src="js/app/settings.js"></script>
+<script src="js/app/data.js"></script>
+<script src="js/app/watchlist.js"></script>
+<script src="js/app/alerts.js"></script>
+<script src="js/app/screener.js"></script>
+<script src="js/app/layouts.js"></script>
+<script src="js/app/context-menu.js"></script>
+<script src="js/app/main.js"></script>
 </body>
 </html>
