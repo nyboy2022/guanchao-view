@@ -1,6 +1,6 @@
 // 应用层：市场切换、周期、多图布局、自选列表（多列表 + 板块 + 拖动排序）、指标、画线、警报、实时订阅。
 (function () {
-  const INTERVALS = [['1m', '1分'], ['5m', '5分'], ['15m', '15分'], ['30m', '30分'], ['1h', '1时'], ['4h', '4时'], ['1d', '日'], ['1w', '周'], ['1M', '月'], ['ytd', '今年至今']];
+  const INTERVALS = [['1m', _t('1分')], ['5m', _t('5分')], ['15m', _t('15分')], ['30m', _t('30分')], ['1h', _t('1时')], ['4h', _t('4时')], ['1d', _t('日')], ['1w', _t('周')], ['1M', _t('月')], ['ytd', _t('今年至今')]];
   const LAYOUTS = [1, 2, 4, 6, 8];
   const STORE = 'guanchao.v1';
   const $ = (id) => document.getElementById(id);
@@ -9,23 +9,40 @@
   const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // 页面里写死的文字换成当前语言（英文时）
+  Prefs.translateDOM(document.body);
+
+  // ---------- 主题和语言 ----------
+  const THEME_NEXT = { auto: 'light', light: 'dark', dark: 'auto' };
+  const THEME_ICON = { auto: '◐', light: '☀', dark: '☾' };
+  const THEME_TIP = { auto: _t('主题：跟随系统'), light: _t('主题：浅色'), dark: _t('主题：深色') };
+  const renderThemeBtn = () => { const b = $('theme-btn'); b.textContent = THEME_ICON[Prefs.themePref]; b.title = THEME_TIP[Prefs.themePref]; };
+  renderThemeBtn();
+  $('theme-btn').onclick = () => { Prefs.setTheme(THEME_NEXT[Prefs.themePref]); renderThemeBtn(); };
+  window.addEventListener('guanchao-theme', (e) => ChartUtil.setTheme(e.detail));
+  $('lang-btn').textContent = Prefs.lang === 'zh' ? 'EN' : '中';
+  $('lang-btn').onclick = () => Prefs.setLang(Prefs.lang === 'zh' ? 'en' : 'zh');
+
   // ---------- 出错时直接显示在页面顶部，方便排查 ----------
   window.addEventListener('error', (e) => {
     const err = e.error, where = err && err.stack ? String(err.stack).split('\n')[1] || '' : (e.filename ? `${e.filename}:${e.lineno}` : '');
     const b = $('banner'); if (!b) return;
-    b.hidden = false; b.textContent = `程序出错：${e.message || err} ${where.trim()}`;
+    b.hidden = false; b.textContent = _t("程序出错：{0} {1}", [e.message || err, where.trim()]);
   });
   window.addEventListener('unhandledrejection', (e) => {
     const b = $('banner'); if (!b) return;
-    b.hidden = false; b.textContent = '程序出错：' + (e.reason && e.reason.message || e.reason);
+    b.hidden = false; b.textContent = _t('程序出错：') + (e.reason && e.reason.message || e.reason);
   });
 
   // ---------- 本地保存 ----------
   const sec = (name) => ({ t: 'h', id: uid('h'), name, collapsed: false });
   const sym = (s) => ({ t: 's', s });
+  // 默认的列表 / 板块名没改过的话，跟着界面语言显示
+  const DEFAULT_NAMES = new Set(['我的自选', '主流', '其他', '科技', '指数 ETF', '新列表']);
+  const dispName = (n) => (DEFAULT_NAMES.has(n) ? _t(n) : n);
   const DEFAULT_LISTS = {
-    crypto: () => [{ id: uid('l'), name: '我的自选', items: [sec('主流'), sym('BTC-USDT'), sym('ETH-USDT'), sec('其他'), sym('SOL-USDT'), sym('BNB-USDT'), sym('XRP-USDT'), sym('DOGE-USDT')] }],
-    us: () => [{ id: uid('l'), name: '我的自选', items: [sec('科技'), sym('AAPL'), sym('MSFT'), sym('NVDA'), sym('AMZN'), sym('TSLA'), sec('指数 ETF'), sym('SPY'), sym('QQQ')] }],
+    crypto: () => [{ id: uid('l'), name: _t('我的自选'), items: [sec(_t('主流')), sym('BTC-USDT'), sym('ETH-USDT'), sec(_t('其他')), sym('SOL-USDT'), sym('BNB-USDT'), sym('XRP-USDT'), sym('DOGE-USDT')] }],
+    us: () => [{ id: uid('l'), name: _t('我的自选'), items: [sec(_t('科技')), sym('AAPL'), sym('MSFT'), sym('NVDA'), sym('AMZN'), sym('TSLA'), sec(_t('指数 ETF')), sym('SPY'), sym('QQQ')] }],
   };
   const defaults = {
     market: 'crypto', interval: '15m',
@@ -56,7 +73,7 @@
     // 旧版单一自选数组 → 多列表
     if (!Array.isArray(mk.lists) || !mk.lists.length) {
       mk.lists = Array.isArray(old.watchlist) && old.watchlist.length
-        ? [{ id: uid('l'), name: '我的自选', items: old.watchlist.map(sym) }]
+        ? [{ id: uid('l'), name: _t('我的自选'), items: old.watchlist.map(sym) }]
         : DEFAULT_LISTS[m]();
     }
     delete mk.watchlist;
@@ -118,13 +135,13 @@
   function makeCell(k) {
     const el = document.createElement('div'); el.className = 'cell';
     el.innerHTML = '<div class="cell-head"><span class="sym"></span><span class="iv"></span><span class="px"></span><span class="chg"></span></div><div class="cell-body"></div>';
-    const c = { k, el, symbol: null, token: 0, unsub: null, loadingMore: false, noMore: false, emptyText: '加载历史数据…', status: 'connecting' };
+    const c = { k, el, symbol: null, token: 0, unsub: null, loadingMore: false, noMore: false, emptyText: _t('加载历史数据…'), status: 'connecting' };
     c.chart = new CandleChart(el.querySelector('.cell-body'), {
       onNeedMore: () => loadMore(c),
       onDrawingsChange: (list) => drawingsChanged(c, list),
       onToolDone: () => setTool('cursor'),
       onSelect: () => { if (c.k === M().active) renderLineAlertBtn(); },
-      askText: (init) => prompt('标注文字：', init || ''),
+      askText: (init) => prompt(_t('标注文字：'), init || ''),
       onContext: (info) => openCtxMenu(c, info),
       // 多图联动：鼠标位置、缩放平移同步到其它图
       onHover: (t) => { if (syncOn()) for (const o of visibleCells()) if (o !== c) o.chart.syncHover(t); },
@@ -179,7 +196,7 @@
   for (const [id, label] of INTERVALS) {
     const b = document.createElement('button');
     b.textContent = label; b.dataset.iv = id;
-    if (id === 'ytd') b.title = '日线，显示今年 1 月 1 日到现在';
+    if (id === 'ytd') b.title = _t('日线，显示今年 1 月 1 日到现在');
     // “今年至今”是日线 + 把视图缩放到今年 1 月 1 日以来
     // 多图时只改当前选中的图（橙色边框那个）
     b.onclick = () => {
@@ -196,7 +213,7 @@
   // ---------- 布局 ----------
   for (const n of LAYOUTS) {
     const b = document.createElement('button');
-    b.textContent = n === 1 ? '1图' : String(n); b.dataset.n = n; b.title = `同时显示 ${n} 个图`;
+    b.textContent = n === 1 ? _t('1图') : String(n); b.dataset.n = n; b.title = _t("同时显示 {0} 个图", [n]);
     b.onclick = () => {
       if (M().layout === n) return;
       M().layout = n; M().active = Math.min(M().active, n - 1); save();
@@ -231,11 +248,11 @@
     const f = feed(), s = c.symbol, token = c.token;
     if (!state.events || state.market !== 'us' || !f.events) { c.chart.setEvents([]); return; }
     const key = f.id + '|' + s;
-    if (!evCache.has(key)) evCache.set(key, f.events(s, Date.UTC(2015, 11, 1), state.avKey).catch((e) => ({ events: [], notes: ['读取失败：' + e.message] })));
+    if (!evCache.has(key)) evCache.set(key, f.events(s, Date.UTC(2015, 11, 1), state.avKey).catch((e) => ({ events: [], notes: [_t('读取失败：') + e.message] })));
     const r = await evCache.get(key);
     if (token !== c.token) return;
     c.chart.setEvents(r.events);
-    if (c.k === M().active) { evNotes = r.notes; const el = $('ev-note'); if (el) el.textContent = evNotes.join('；'); }
+    if (c.k === M().active) { evNotes = r.notes; const el = $('ev-note'); if (el) el.textContent = evNotes.join(Prefs.semi); }
   }
   async function loadCompares(c) {
     const token = c.token, list = [];
@@ -250,10 +267,10 @@
   async function addCompare(raw) {
     const s = feed().normalizeSymbol(raw || '');
     if (!s || compares().includes(s)) return;
-    if (compares().length >= 3) { alertToast('最多对比 3 个品种', '可以先删掉一个再加。'); return; }
+    if (compares().length >= 3) { alertToast(_t('最多对比 3 个品种'), _t('可以先删掉一个再加。')); return; }
     let ok = wantedSyms().includes(s);
     if (!ok) try { ok = await feed().validateSymbol(s); } catch (_) {}
-    if (!ok) { alertToast('找不到这个代码', s); return; }
+    if (!ok) { alertToast(_t('找不到这个代码'), s); return; }
     compares().push(s); save(); renderIndicatorPanel();
     visibleCells().forEach(loadCompares); startTickers();
   }
@@ -274,25 +291,25 @@
     indList.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'ind-head';
-    head.innerHTML = '<b>指标</b><small>改完立即生效，会自动保存；所有图共用</small>';
+    head.innerHTML = _t('<b>指标</b><small>改完立即生效，会自动保存；所有图共用</small>');
     indList.appendChild(head);
     // 成交量分布
     const vp = document.createElement('div'); vp.className = 'ind-sec';
-    vp.innerHTML = `<label><input type="checkbox" id="vp-cb" ${state.vprofile ? 'checked' : ''}>成交量分布（各价位成交量，画在主图右侧）</label>`;
+    vp.innerHTML = _t("<label><input type=\"checkbox\" id=\"vp-cb\" {0}>成交量分布（各价位成交量，画在主图右侧）</label>", [state.vprofile ? 'checked' : '']);
     vp.querySelector('input').onchange = (e) => { state.vprofile = e.target.checked; save(); cells.forEach((c) => c.chart.setVolumeProfile(state.vprofile)); };
     indList.appendChild(vp);
     // 财报 / 分红标记
     const evs = document.createElement('div'); evs.className = 'ind-sec ev-sec';
     evs.innerHTML = state.market === 'us'
-      ? `<label><input type="checkbox" id="ev-cb" ${state.events ? 'checked' : ''}>财报 / 分红 / 拆股标记（图底部的 E、D、S，鼠标移上去看详情）</label><small id="ev-note">${esc(state.events ? evNotes.join('；') : '')}</small>`
-      : '<label class="off"><input type="checkbox" disabled>财报 / 分红标记：只有美股有</label>';
+      ? _t("<label><input type=\"checkbox\" id=\"ev-cb\" {0}>财报 / 分红 / 拆股标记（图底部的 E、D、S，鼠标移上去看详情）</label><small id=\"ev-note\">{1}</small>", [state.events ? 'checked' : '', esc(state.events ? evNotes.join(Prefs.semi) : '')])
+      : _t('<label class="off"><input type="checkbox" disabled>财报 / 分红标记：只有美股有</label>');
     const evcb = evs.querySelector('#ev-cb');
     if (evcb) evcb.onchange = (e) => { state.events = e.target.checked; save(); visibleCells().forEach(loadEvents); renderIndicatorPanel(); };
     indList.appendChild(evs);
     // 对比叠加
     const cmp = document.createElement('div'); cmp.className = 'ind-sec';
-    cmp.innerHTML = '<span>对比叠加</span>' + compares().map((x, k) => `<span class="chip"><i style="background:${CMP_COLORS[k % 3]}"></i>${esc(x)}<button data-k="${k}" title="去掉">×</button></span>`).join('') +
-      `<input type="text" id="cmp-in" placeholder="${state.market === 'us' ? 'SPY' : 'ETH'}" spellcheck="false"><button class="btn" id="cmp-add">+ 对比</button>`;
+    cmp.innerHTML = _t('<span>对比叠加</span>') + compares().map((x, k) => _t("<span class=\"chip\"><i style=\"background:{0}\"></i>{1}<button data-k=\"{2}\" title=\"去掉\">×</button></span>", [CMP_COLORS[k % 3], esc(x), k])).join('') +
+      _t("<input type=\"text\" id=\"cmp-in\" placeholder=\"{0}\" spellcheck=\"false\"><button class=\"btn\" id=\"cmp-add\">+ 对比</button>", [state.market === 'us' ? 'SPY' : 'ETH']);
     cmp.querySelectorAll('.chip button').forEach((b) => (b.onclick = () => {
       compares().splice(+b.dataset.k, 1); save(); renderIndicatorPanel(); visibleCells().forEach(loadCompares); startTickers();
     }));
@@ -300,22 +317,22 @@
     cmp.querySelector('#cmp-in').onkeydown = (e) => { if (e.key === 'Enter') addCompare(e.target.value); };
     indList.appendChild(cmp);
     if (!state.indicators.length) {
-      const e = document.createElement('div'); e.className = 'ind-empty'; e.textContent = '还没有指标，在下面添加'; indList.appendChild(e);
+      const e = document.createElement('div'); e.className = 'ind-empty'; e.textContent = _t('还没有指标，在下面添加'); indList.appendChild(e);
     }
     state.indicators.forEach((inst, idx) => {
       const def = Indicators.TYPES[inst.type];
       const row = document.createElement('div');
       row.className = 'ind-row' + (inst.visible === false ? ' off' : '');
       const vis = document.createElement('input');
-      vis.type = 'checkbox'; vis.checked = inst.visible !== false; vis.title = '显示 / 隐藏';
+      vis.type = 'checkbox'; vis.checked = inst.visible !== false; vis.title = _t('显示 / 隐藏');
       vis.onchange = () => { inst.visible = vis.checked; row.classList.toggle('off', !vis.checked); applyIndicators(); };
       const name = document.createElement('span');
       name.className = 'ind-name'; name.textContent = def.name.split(' ')[0];
-      name.title = def.name + (def.kind === 'pane' ? '（副图）' : '（主图）');
+      name.title = def.name + (def.kind === 'pane' ? _t('（副图）') : _t('（主图）'));
       row.append(vis, name);
       const params = document.createElement('span');
       params.className = 'ind-params';
-      if (!def.params.length) { const s = document.createElement('label'); s.textContent = inst.type === 'vwap' ? '每个交易日重新计算' : '无参数'; params.appendChild(s); }
+      if (!def.params.length) { const s = document.createElement('label'); s.textContent = inst.type === 'vwap' ? _t('每个交易日重新计算') : _t('无参数'); params.appendChild(s); }
       for (const pd of def.params) {
         const l = document.createElement('label');
         l.textContent = pd.label;
@@ -331,10 +348,10 @@
       }
       row.appendChild(params);
       const color = document.createElement('input');
-      color.type = 'color'; color.value = inst.color; color.title = '颜色';
+      color.type = 'color'; color.value = inst.color; color.title = _t('颜色');
       color.oninput = () => { inst.color = color.value; applyIndicators(); };
       const del = document.createElement('button');
-      del.className = 'ind-del'; del.textContent = '×'; del.title = '删除';
+      del.className = 'ind-del'; del.textContent = '×'; del.title = _t('删除');
       del.onclick = () => { state.indicators.splice(idx, 1); applyIndicators(); renderIndicatorPanel(); };
       row.append(color, del);
       indList.appendChild(row);
@@ -343,14 +360,14 @@
     add.className = 'ind-add';
     const sel = document.createElement('select');
     for (const kind of ['overlay', 'pane']) {
-      const g = document.createElement('optgroup'); g.label = kind === 'overlay' ? '主图（画在K线上）' : '副图（单独一栏）';
+      const g = document.createElement('optgroup'); g.label = kind === 'overlay' ? _t('主图（画在K线上）') : _t('副图（单独一栏）');
       for (const [k, d] of Object.entries(Indicators.TYPES)) if (d.kind === kind) {
         const o = document.createElement('option'); o.value = k; o.textContent = d.name; g.appendChild(o);
       }
       sel.appendChild(g);
     }
     const btn = document.createElement('button');
-    btn.className = 'btn primary'; btn.textContent = '+ 添加';
+    btn.className = 'btn primary'; btn.textContent = _t('+ 添加');
     btn.onclick = () => {
       const type = sel.value;
       // 同类指标再加一条时，换个颜色、默认周期也错开，方便区分
@@ -361,7 +378,7 @@
       indList.querySelector('.ind-add select').value = type;
     };
     const reset = document.createElement('button');
-    reset.className = 'btn'; reset.textContent = '恢复默认';
+    reset.className = 'btn'; reset.textContent = _t('恢复默认');
     reset.onclick = () => { state.indicators = Indicators.defaults(); applyIndicators(); renderIndicatorPanel(); };
     add.append(sel, btn, reset);
     indList.appendChild(add);
@@ -461,7 +478,7 @@
     if (!s) return;
     if (!allKnownSyms().includes(s)) {
       let ok = false; try { ok = await feed().validateSymbol(s); } catch (_) {}
-      if (!ok) { alertToast('找不到这个代码', s); return; }
+      if (!ok) { alertToast(_t('找不到这个代码'), s); return; }
     }
     openSymbol(s);
   }
@@ -497,12 +514,12 @@
   $('settings-btn').onclick = openSettings;
   $('tr-test').onclick = async () => {
     const el = $('tr-test-res'), tok = form.tradier.value.trim();
-    if (!tok) { el.textContent = '先填 Token'; return; }
-    el.textContent = '测试中…';
+    if (!tok) { el.textContent = _t('先填 Token'); return; }
+    el.textContent = _t('测试中…');
     const r = await Feeds.AlpacaFeed.testTradier(tok);
     if (!r.ok) { el.textContent = '✗ ' + r.msg; return; }
     const age = r.t ? Math.round((Date.now() - r.t) / 60e3) : null;
-    el.textContent = `✓ 连接成功：AAPL 最新成交 ${fmtPx(r.last)}` + (r.t ? `（${new Date(r.t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${age != null && age < 2 ? '，实时' : ''}）` : '') + `，近几天分钟K线 ${r.bars} 根`;
+    el.textContent = _t("✓ 连接成功：AAPL 最新成交 {0}", [fmtPx(r.last)]) + (r.t ? Prefs.paren(new Date(r.t).toLocaleString(Prefs.locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (age != null && age < 2 ? _t('，实时') : '')) : '') + _t("，近几天分钟K线 {0} 根", [r.bars]);
   };
   const readPushForm = () => ({ ntfy: form.ntfy.value.trim(), discord: form.discord.value.trim(), bark: form.bark.value.trim() });
   $('ntfy-gen').onclick = () => { const r = crypto.getRandomValues(new Uint8Array(9)); form.ntfy.value = 'guanchao-' + [...r].map((x) => 'abcdefghijkmnpqrstuvwxyz23456789'[x % 32]).join(''); };
@@ -520,31 +537,31 @@
     // 用 data: 地址：本地文件打开的页面里 blob: 地址会丢掉文件名
     a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(pack, null, 1));
     a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    $('bk-res').textContent = `已导出 ${name}（在「下载」文件夹）` + (withKeys ? '，包含 Key' : '，不含 Key');
+    $('bk-res').textContent = _t("已导出 {0}（在「下载」文件夹）", [name]) + (withKeys ? _t('，包含 Key') : _t('，不含 Key'));
   };
   $('bk-import').onclick = () => $('bk-file').click();
   $('bk-file').onchange = async () => {
     const f = $('bk-file').files[0]; $('bk-file').value = '';
     if (!f) return;
     let pack;
-    try { pack = JSON.parse(await f.text()); } catch (_) { $('bk-res').textContent = '这个文件不是有效的备份'; return; }
-    if (!pack || pack.app !== 'guanchao' || !pack.data || typeof pack.data !== 'object' || !pack.data.markets) { $('bk-res').textContent = '这个文件不是观潮看盘的备份'; return; }
+    try { pack = JSON.parse(await f.text()); } catch (_) { $('bk-res').textContent = _t('这个文件不是有效的备份'); return; }
+    if (!pack || pack.app !== 'guanchao' || !pack.data || typeof pack.data !== 'object' || !pack.data.markets) { $('bk-res').textContent = _t('这个文件不是观潮看盘的备份'); return; }
     const d = pack.data, n = (m) => (d.markets[m] && d.markets[m].lists || []).reduce((k, l) => k + l.items.filter((x) => x.t === 's').length, 0);
-    const msg = `导入 ${new Date(pack.exportedAt).toLocaleString()} 的备份？\n\n` +
-      `美股 ${n('us')} 只、加密货币 ${n('crypto')} 只，画线 ${Object.values(d.drawings || {}).reduce((k, l) => k + l.length, 0)} 条，布局 ${(d.layouts || []).length} 个，警报 ${(d.alerts || []).length} 个。\n\n` +
-      `现在的自选、画线、布局、警报和设置会被替换。` + (pack.withKeys ? '备份里的 Key 也会替换现在的 Key。' : '备份里没有 Key，会保留你现在的 Key。');
+    const msg = _t("导入 {0} 的备份？\n\n", [new Date(pack.exportedAt).toLocaleString()]) +
+      _t("美股 {0} 只、加密货币 {1} 只，画线 {2} 条，布局 {3} 个，警报 {4} 个。\n\n", [n('us'), n('crypto'), Object.values(d.drawings || {}).reduce((k, l) => k + l.length, 0), (d.layouts || []).length, (d.alerts || []).length]) +
+      _t("现在的自选、画线、布局、警报和设置会被替换。") + (pack.withKeys ? _t('备份里的 Key 也会替换现在的 Key。') : _t('备份里没有 Key，会保留你现在的 Key。'));
     if (!confirm(msg)) return;
     const next = { ...d };
     if (!pack.withKeys) { next.alpaca = { ...(d.alpaca || {}), key: state.alpaca.key, secret: state.alpaca.secret, tradier: state.alpaca.tradier || '' }; next.avKey = state.avKey; next.push = { ...state.push }; }
-    try { localStorage.setItem(STORE, JSON.stringify(next)); } catch (_) { $('bk-res').textContent = '保存失败'; return; }
+    try { localStorage.setItem(STORE, JSON.stringify(next)); } catch (_) { $('bk-res').textContent = _t('保存失败'); return; }
     dlg.close(); location.reload();
   };
   $('push-test').onclick = async () => {
     const cfg = readPushForm(), el = $('push-test-res');
-    if (!cfg.ntfy && !cfg.discord && !cfg.bark) { el.textContent = '先填一个推送方式'; return; }
-    el.textContent = '发送中…';
-    const r = await sendPush('🔔 观潮看盘测试', '收到这条，说明警报推送设置好了。', cfg);
-    el.textContent = r.map((x) => `${x.name}${x.ok === true ? ' ✓ 已发出' : x.ok === false ? ' ✗ ' + x.err : ' 已发出（请看手机/频道）'}`).join('　');
+    if (!cfg.ntfy && !cfg.discord && !cfg.bark) { el.textContent = _t('先填一个推送方式'); return; }
+    el.textContent = _t('发送中…');
+    const r = await sendPush(_t('🔔 观潮看盘测试'), _t('收到这条，说明警报推送设置好了。'), cfg);
+    el.textContent = r.map((x) => `${x.name}${x.ok === true ? _t(' ✓ 已发出') : x.ok === false ? ' ✗ ' + x.err : _t(' 已发出（请看手机/频道）')}`).join('　');
   };
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'save') return;
@@ -559,8 +576,8 @@
 
   // ---------- 状态显示 ----------
   const STATUS_TEXT = {
-    live: '实时', connecting: '连接中…', reconnecting: '断线重连中…', sim: '演示数据', error: '加载失败',
-    autherr: 'API Key 无效', noperm: '无权限（SIP 需付费套餐）', paused: '已暂停（其它窗口在用）', connlimit: '连接数超限', symlimit: '订阅数超限', nokey: '未设置 API Key',
+    live: _t('实时'), connecting: _t('连接中…'), reconnecting: _t('断线重连中…'), sim: _t('演示数据'), error: _t('加载失败'),
+    autherr: _t('API Key 无效'), noperm: _t('无权限（SIP 需付费套餐）'), paused: _t('已暂停（其它窗口在用）'), connlimit: _t('连接数超限'), symlimit: _t('订阅数超限'), nokey: _t('未设置 API Key'),
   };
   let statusBanner = false;
   // 实时推送诊断：状态旁显示最近一笔成交是几秒前，鼠标移上去看详情
@@ -569,8 +586,8 @@
     if (!el || !f.streamStats || el.dataset.state !== 'live') { if (el) el.title = ''; const x = el && el.querySelector('em'); if (x) x.remove(); return; }
     const st = f.streamStats(), age = st.last ? Math.max(0, Math.round((Date.now() - st.last.t) / 1000)) : null;
     let em = el.querySelector('em'); if (!em) { em = document.createElement('em'); el.appendChild(em); }
-    em.textContent = age == null ? ' · 等待成交' : age < 60 ? ` · ${age}秒前` : age < 3600 ? ` · ${Math.round(age / 60)}分钟前` : ' · 暂无新成交';
-    el.title = `实时来源：${st.src}，订阅 ${st.subs} 只\n收到成交 ${st.n} 笔` + (st.last ? `\n最近一笔：${st.last.sym} ${fmtPx(st.last.p)}，${new Date(st.last.t).toLocaleTimeString('zh-CN')}` : '');
+    em.textContent = age == null ? _t(' · 等待成交') : age < 60 ? _t(" · {0}秒前", [age]) : age < 3600 ? _t(" · {0}分钟前", [Math.round(age / 60)]) : _t(' · 暂无新成交');
+    el.title = _t("实时来源：{0}，订阅 {1} 只\n收到成交 {2} 笔", [st.src, st.subs, st.n]) + (st.last ? _t("\n最近一笔：{0} {1}，{2}", [st.last.sym, fmtPx(st.last.p), new Date(st.last.t).toLocaleTimeString(Prefs.locale)]) : '');
   }, 2000);
   function setStatus(s, quiet) {
     const el = $('status');
@@ -581,25 +598,25 @@
     // 连接恢复正常后，清掉之前因连接问题弹出的提示
     if (s === 'live' && statusBanner) { statusBanner = false; showBanner(''); }
     if (['autherr', 'noperm', 'connlimit', 'symlimit'].includes(s)) statusBanner = true;
-    if (s === 'autherr') showBanner(state.alpaca.tradier ? 'Alpaca Key 或 Tradier Token 被拒绝，请检查是否填对。Tradier 要用正式环境（Production）的 Access Token，不能用 Sandbox 的。' : 'Alpaca 拒绝了你的 API Key，请检查 Key 和 Secret 是否填对。', '打开设置', openSettings);
-    if (s === 'noperm') showBanner('当前 Alpaca 账号没有 SIP 全市场实时数据权限（需要付费套餐）。可以在设置里改回 IEX（免费）。', '打开设置', openSettings);
-    if (s === 'connlimit') showBanner('Alpaca 免费账号同时只能开一个行情连接，正在自动重试。如果一直连不上，请关掉其它正在使用这个 Key 的窗口或程序。');
-    if (s === 'symlimit') showBanner('超过 Alpaca 免费账号的订阅上限（同时最多 30 只股票，包括所有图、当前自选列表和警报里的股票），请减少一些。');
+    if (s === 'autherr') showBanner(state.alpaca.tradier ? _t('Alpaca Key 或 Tradier Token 被拒绝，请检查是否填对。Tradier 要用正式环境（Production）的 Access Token，不能用 Sandbox 的。') : _t('Alpaca 拒绝了你的 API Key，请检查 Key 和 Secret 是否填对。'), _t('打开设置'), openSettings);
+    if (s === 'noperm') showBanner(_t('当前 Alpaca 账号没有 SIP 全市场实时数据权限（需要付费套餐）。可以在设置里改回 IEX（免费）。'), _t('打开设置'), openSettings);
+    if (s === 'connlimit') showBanner(_t('Alpaca 免费账号同时只能开一个行情连接，正在自动重试。如果一直连不上，请关掉其它正在使用这个 Key 的窗口或程序。'));
+    if (s === 'symlimit') showBanner(_t('超过 Alpaca 免费账号的订阅上限（同时最多 30 只股票，包括所有图、当前自选列表和警报里的股票），请减少一些。'));
   }
   setInterval(() => {
     const el = $('status');
     if (el.dataset.state !== 'live' || !lastEventAt) return;
     const age = Math.round((Date.now() - lastEventAt) / 1000);
-    el.querySelector('span').textContent = age <= 2 ? '实时' : age < 120 ? `实时 · ${age}秒前有成交` : '已连接 · 暂无成交';
+    el.querySelector('span').textContent = age <= 2 ? _t('实时') : age < 120 ? _t("实时 · {0}秒前有成交", [age]) : _t('已连接 · 暂无成交');
   }, 1000);
   function showBanner(text, btnText, btnFn) {
     const b = $('banner'); b.hidden = !text; b.textContent = text || '';
     if (btnText) { const x = document.createElement('button'); x.className = 'btn'; x.textContent = btnText; x.onclick = btnFn; b.appendChild(x); }
   }
   function renderSourceNote() {
-    let t = '数据源：' + feed().label;
-    if (state.market === 'us' && feed() === Feeds.AlpacaFeed) t += state.extHours ? ' · 含盘前盘后' : ' · 只看常规时段（多数看盘软件的默认做法）';
-    $('source-note').textContent = t + ' · 时间为本地时区';
+    let t = _t('数据源：') + feed().label;
+    if (state.market === 'us' && feed() === Feeds.AlpacaFeed) t += state.extHours ? _t(' · 含盘前盘后') : _t(' · 只看常规时段（多数看盘软件的默认做法）');
+    $('source-note').textContent = t + _t(' · 时间为本地时区');
   }
 
   // ---------- 报价：顶部 + 每个格子的小标题 ----------
@@ -607,7 +624,7 @@
   const fmtPct = (p) => (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
   const cellPrice = (c) => { const b = c.chart.bars[c.chart.bars.length - 1]; const t = tickers[c.symbol]; return b ? b.c : t && t.last; };
   // 延迟 15 分钟的价格旁边放一个黄圈 D
-  const DLY_TIP = '延迟 15 分钟：这个价格来自全市场数据（Alpaca 免费版这时没有实时成交），比实际晚约 15 分钟';
+  const DLY_TIP = _t('延迟 15 分钟：这个价格来自全市场数据（Alpaca 免费版这时没有实时成交），比实际晚约 15 分钟');
   const dlyHtml = (tip) => `<span class="dly" title="${esc(tip || DLY_TIP)}">D</span>`;
   const chartDelayed = () => state.market === 'us' && !!(feed().chartDelayed && feed().chartDelayed());
   function setDly(after, on) {
@@ -634,12 +651,12 @@
     $('q-price').textContent = fmtPx(px);
     const ce = $('q-change');
     if (t) {
-      ce.textContent = fmtPct(t.changePct) + '  ' + (state.market === 'us' ? '今日' : '24h');
+      ce.textContent = fmtPct(t.changePct) + '  ' + (state.market === 'us' ? _t('今日') : '24h');
       ce.className = 'q-change ' + (t.changePct >= 0 ? 'up' : 'down');
       $('q-price').className = 'q-price ' + (t.changePct >= 0 ? 'up' : 'down');
     } else { ce.textContent = ''; $('q-price').className = 'q-price'; }
     setDly($('q-price'), chartDelayed() && px != null);
-    if (px != null) document.title = (flashTitle ? '🔔 ' : '') + `${s} ${fmtPx(px)} · 观潮看盘`;
+    if (px != null) document.title = (flashTitle ? '🔔 ' : '') + _t("{0} {1} · 观潮看盘", [s, fmtPx(px)]);
   }
 
   // ---------- 加载 K 线 ----------
@@ -659,16 +676,16 @@
     const iv = ivOf(c.k), ytd = ivKey(c.k) === 'ytd';
     c.symbol = symbol; c.iv = iv; c.ivKey = ivKey(c.k); c.feedId = f.id + state.extHours;
     c.noMore = false; c.loadingMore = false;
-    c.emptyText = '加载历史数据…';
+    c.emptyText = _t('加载历史数据…');
     c.chart.setSessionKey(state.market === 'us' ? etDay : utcDay);
     c.chart.setData([], Feeds.INTERVAL_MS[iv]);
     c.chart.setDrawings(state.drawings[symbol] || []);
     renderCellHead(c);
     const isActive = () => c.k === M().active;
     if (f === Feeds.AlpacaFeed && !f.hasKey()) {
-      c.emptyText = '请先点右上角「⚙ 设置」填入 Alpaca API Key 或 Tradier Token';
+      c.emptyText = _t('请先点右上角「⚙ 设置」填入 Alpaca API Key 或 Tradier Token');
       c.status = 'nokey'; if (isActive()) setStatus('nokey');
-      showBanner('看美股实时行情需要一个免费的 Alpaca API Key（在 alpaca.markets 注册后生成），或者 Tradier 证券账户的 Token，填到设置里。', '打开设置', openSettings);
+      showBanner(_t('看美股实时行情需要一个免费的 Alpaca API Key（在 alpaca.markets 注册后生成），或者 Tradier 证券账户的 Token，填到设置里。'), _t('打开设置'), openSettings);
       c.chart.dirty = true;
       return;
     }
@@ -680,19 +697,19 @@
       if (err.kind === 'network' && f.id !== 'sim') {
         if (!usingSim[state.market]) {
           usingSim[state.market] = true;
-          showBanner(`无法连接${state.market === 'us' ? (state.alpaca.tradier ? ' Tradier' : ' Alpaca') : ' OKX'} 行情接口（网络或地区限制），已切换为演示数据。图表上的价格不是真实行情。`);
+          showBanner(_t("无法连接{0} 行情接口（网络或地区限制），已切换为演示数据。图表上的价格不是真实行情。", [state.market === 'us' ? (state.alpaca.tradier ? ' Tradier' : ' Alpaca') : ' OKX']));
           startTickers(); loadAll();
         }
         return;
       }
-      c.emptyText = err.kind === 'auth' ? 'API Key 无效或没有权限' : '加载失败：' + err.message;
+      c.emptyText = err.kind === 'auth' ? _t('API Key 无效或没有权限') : _t('加载失败：') + err.message;
       c.status = err.kind === 'auth' ? (state.alpaca.feed === 'sip' && !state.alpaca.tradier ? 'noperm' : 'autherr') : 'error';
       if (isActive()) setStatus(c.status);
       c.chart.dirty = true;
       return;
     }
     if (token !== c.token) return;
-    if (!bars.length) c.emptyText = state.market === 'us' && !state.extHours ? '这个周期暂无常规时段数据' : '这个周期暂无数据';
+    if (!bars.length) c.emptyText = state.market === 'us' && !state.extHours ? _t('这个周期暂无常规时段数据') : _t('这个周期暂无数据');
     c.chart.setData(bars, Feeds.INTERVAL_MS[iv]);
     if (compares().length) loadCompares(c); else c.chart.setCompares([]);
     loadEvents(c);
@@ -734,28 +751,28 @@
   function renderListSelect() {
     const sel = $('list-sel'); sel.innerHTML = '';
     for (const l of M().lists) {
-      const o = document.createElement('option'); o.value = l.id; o.textContent = `${l.name}（${listSyms(l).length}）`; sel.appendChild(o);
+      const o = document.createElement('option'); o.value = l.id; o.textContent = dispName(l.name) + Prefs.paren(listSyms(l).length); sel.appendChild(o);
     }
     sel.value = activeList().id;
   }
   $('list-sel').onchange = (e) => { M().activeList = e.target.value; save(); renderWatchlist(); startTickers(); };
   $('list-new').onclick = () => {
-    const name = (prompt('新列表的名字：', '新列表') || '').trim(); if (!name) return;
+    const name = (prompt(_t('新列表的名字：'), _t('新列表')) || '').trim(); if (!name) return;
     const l = { id: uid('l'), name, items: [] }; M().lists.push(l); M().activeList = l.id; save(); renderWatchlist(); startTickers();
     $('add-input').focus();
   };
   $('list-ren').onclick = () => {
-    const l = activeList(); const name = (prompt('列表改名为：', l.name) || '').trim(); if (!name) return;
+    const l = activeList(); const name = (prompt(_t('列表改名为：'), l.name) || '').trim(); if (!name) return;
     l.name = name; save(); renderWatchlist();
   };
   $('list-del').onclick = () => {
-    if (M().lists.length <= 1) { alertToast('至少要保留一个列表', '可以先新建一个列表再删这个。'); return; }
+    if (M().lists.length <= 1) { alertToast(_t('至少要保留一个列表'), _t('可以先新建一个列表再删这个。')); return; }
     const l = activeList();
-    if (!confirm(`删除列表「${l.name}」？里面的 ${listSyms(l).length} 个品种会从这个列表移除（不影响其它列表）。`)) return;
+    if (!confirm(_t("删除列表「{0}」？里面的 {1} 个品种会从这个列表移除（不影响其它列表）。", [l.name, listSyms(l).length]))) return;
     M().lists = M().lists.filter((x) => x !== l); M().activeList = M().lists[0].id; save(); renderWatchlist(); startTickers();
   };
   $('sec-new').onclick = () => {
-    const name = (prompt('新板块的名字（例如：科技、半导体、ETF）：', '') || '').trim(); if (!name) return;
+    const name = (prompt(_t('新板块的名字（例如：科技、半导体、ETF）：'), '') || '').trim(); if (!name) return;
     activeList().items.push(sec(name)); save(); renderWatchlist();
   };
 
@@ -766,7 +783,7 @@
     const shown = new Set(visibleCells().map((c) => c.symbol));
     const alertSet = new Set(state.alerts.filter((a) => a.active && a.market === state.market).map((a) => a.symbol));
     ul.innerHTML = '';
-    if (!items.length) { const e = document.createElement('li'); e.className = 'wl-empty'; e.textContent = '这个列表还是空的，在上面输入代码添加'; ul.appendChild(e); return; }
+    if (!items.length) { const e = document.createElement('li'); e.className = 'wl-empty'; e.textContent = _t('这个列表还是空的，在上面输入代码添加'); ul.appendChild(e); return; }
     let section = null;
     items.forEach((it, idx) => {
       const li = document.createElement('li');
@@ -774,12 +791,12 @@
       if (it.t === 'h') {
         section = it;
         li.className = 'sec';
-        li.innerHTML = `<span class="caret">${it.collapsed ? '▸' : '▾'}</span><span class="sname">${esc(it.name)}</span><small>${countIn(items, idx)}</small>` +
-          '<button class="ren" title="重命名板块">✎</button><button class="x" title="删除板块（里面的品种保留）">×</button>';
+        li.innerHTML = `<span class="caret">${it.collapsed ? '▸' : '▾'}</span><span class="sname">${esc(dispName(it.name))}</span><small>${countIn(items, idx)}</small>` +
+          _t('<button class="ren" title="重命名板块">✎</button><button class="x" title="删除板块（里面的品种保留）">×</button>');
         li.onclick = (e) => {
           if (e.target.classList.contains('x')) { e.stopPropagation(); items.splice(idx, 1); save(); renderWatchlist(); return; }
           if (e.target.classList.contains('ren')) {
-            e.stopPropagation(); const name = (prompt('板块改名为：', it.name) || '').trim(); if (name) { it.name = name; save(); renderWatchlist(); } return;
+            e.stopPropagation(); const name = (prompt(_t('板块改名为：'), it.name) || '').trim(); if (name) { it.name = name; save(); renderWatchlist(); } return;
           }
           it.collapsed = !it.collapsed; save(); renderWatchlist();
         };
@@ -788,9 +805,9 @@
         li.dataset.sym = s;
         li.className = (s === cur ? 'on ' : shown.has(s) && M().layout > 1 ? 'shown ' : '') + (section ? 'in-sec ' : '') + (section && section.collapsed ? 'hide' : '');
         const [base, quote] = s.split('-');
-        li.innerHTML = `<span class="sym">${esc(base)}${quote ? `<small style="color:#6b7790">/${esc(quote)}</small>` : ''}${alertSet.has(s) ? '<span class="bell" title="有生效中的警报">🔔</span>' : ''}</span>` +
+        li.innerHTML = `<span class="sym">${esc(base)}${quote ? `<small style="color:var(--faint)">/${esc(quote)}</small>` : ''}${alertSet.has(s) ? _t('<span class="bell" title="有生效中的警报">🔔</span>') : ''}</span>` +
           `<span class="px">${fmtPx(t && t.last)}</span><span class="chg ${t ? (t.changePct >= 0 ? 'up' : 'down') : ''}">${t ? fmtPct(t.changePct) : '—'}</span>` +
-          extHtml(s) + '<button class="x" title="移出这个列表">×</button>';
+          extHtml(s) + _t('<button class="x" title="移出这个列表">×</button>');
         if (extShown(s)) li.classList.add('has-ext');
         li.onclick = (e) => {
           if (e.target.classList.contains('x')) { e.stopPropagation(); items.splice(idx, 1); save(); renderWatchlist(); startTickers(); return; }
@@ -899,15 +916,15 @@
   let extQ = {}, extNote = '', extTimer = null;
   // 时段切换时（如 08:00、17:00）D 标记要跟着变
   setInterval(() => { cells.forEach(renderCellHead); renderQuote(); }, 30e3);
-  const EXT_LABEL = { pre: '盘前', post: '盘后', night: '夜盘' };
+  const EXT_LABEL = { pre: _t('盘前'), post: _t('盘后'), night: _t('夜盘') };
   const extShown = (s) => state.market === 'us' && !!extQ[s];
   function extHtml(s) {
     const q = extShown(s) && extQ[s]; if (!q) return '';
     // 参考价用上面一行的常规时段价格（收盘后就是官方收盘价），两行对得上
     const ref = closeRef[s] != null ? closeRef[s] : (tickers[s] && !tickers[s].ext && tickers[s].last) || q.ref;
     const pct = q.price != null && ref ? ((q.price - ref) / ref) * 100 : null;
-    const when = q.t ? new Date(q.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
-    const tip = q.price == null ? `${EXT_LABEL[q.session]}还没有成交` : `${EXT_LABEL[q.session]}最新成交 ${when}，涨跌相对常规时段收盘 ${fmtPx(ref)}`;
+    const when = q.t ? new Date(q.t).toLocaleTimeString(Prefs.locale, { hour: '2-digit', minute: '2-digit' }) : '';
+    const tip = q.price == null ? _t("{0}还没有成交", [EXT_LABEL[q.session]]) : _t("{0}最新成交 {1}，涨跌相对常规时段收盘 {2}", [EXT_LABEL[q.session], when, fmtPx(ref)]);
     return `<span class="ext" title="${esc(tip)}"><i class="${q.session}">${EXT_LABEL[q.session]}</i>${q.price == null ? '—' : fmtPx(q.price)}${q.delayed && q.price != null ? dlyHtml() : ''}` +
       `<b class="${pct == null ? '' : pct >= 0 ? 'up' : 'down'}">${pct == null ? '' : fmtPct(pct)}</b></span>`;
   }
@@ -962,7 +979,7 @@
     if (items.some((x) => x.t === 's' && x.s === s)) { inp.value = ''; return; }
     let ok = false;
     try { ok = await feed().validateSymbol(s); } catch (_) {}
-    if (!ok) { inp.classList.add('err'); inp.title = '找不到该代码'; setTimeout(() => inp.classList.remove('err'), 1500); return; }
+    if (!ok) { inp.classList.add('err'); inp.title = _t('找不到该代码'); setTimeout(() => inp.classList.remove('err'), 1500); return; }
     items.push(sym(s)); save(); inp.value = '';
     renderWatchlist(); startTickers();
   };
@@ -971,16 +988,23 @@
   // 警报：到价提醒 + 画线（水平线 / 趋势线）穿越提醒
   //   { id, market, symbol, kind: 'price'|'line', cond: 'up'|'down'|'cross', price, drawingId, repeat: 'once'|'every', active, created, lastAt }
   // =====================================================================
-  const COND = { up: '上穿', down: '下穿', cross: '穿越' };
+  const COND = { up: _t('上穿'), down: _t('下穿'), cross: _t('穿越') };
   const lastPx = {};            // 'market:symbol' → 最近一次价格
   const drawingOf = (a) => (state.drawings[a.symbol] || []).find((d) => d.id === a.drawingId);
+  const lineKey = (d) => [d.p1.t, d.p1.p, d.p2 && d.p2.t, d.p2 && d.p2.p].join(',');
+  function noteLineRef(a, d, chart) {
+    const r = chart.drawingRef(d); if (r && isFinite(r.p) && isFinite(r.perMs)) a.ref = { ...r, key: lineKey(d) };
+  }
   function alertLevel(a, t) {
     if (a.kind === 'price') return a.price;
     const d = drawingOf(a); if (!d) return null;
-    // 图里正在显示这个品种：按图上看到的位置算（趋势线向右延长）
-    const c = a.market === state.market && visibleCells().find((x) => x.symbol === a.symbol && x.chart.bars.length);
-    if (c) return c.chart.drawingPriceAt(d, t);
     if (d.type === 'hline') return d.p1.p;
+    // 图里正在显示这个品种：按图上看到的位置算（趋势线向右延长），顺便记下这条线的走法
+    const c = a.market === state.market && visibleCells().find((x) => x.symbol === a.symbol && x.chart.bars.length);
+    if (c) { noteLineRef(a, d, c.chart); return c.chart.drawingPriceAt(d, t); }
+    // 图没在显示：沿用上次在图上看到的那条线继续延长，和图上的位置保持一致
+    const r = a.ref;
+    if (r && r.key === lineKey(d)) return r.p + r.perMs * (t - r.t);
     if (d.p2.t === d.p1.t) return d.p2.p;
     return d.p1.p + ((d.p2.p - d.p1.p) * (t - d.p1.t)) / (d.p2.t - d.p1.t);
   }
@@ -1000,17 +1024,17 @@
       a.lastAt = now;
       if (a.repeat !== 'every') a.active = false;
       fired = true;
-      fireAlert(a, p, lv, up ? '上穿' : '下穿');
+      fireAlert(a, p, lv, up ? _t('上穿') : _t('下穿'));
     }
     if (fired) alertsChanged();
   }
   function alertTitle(a) {
     if (a.kind === 'price') return `${a.symbol} ${COND[a.cond]} ${fmtPx(a.price)}`;
     const d = drawingOf(a);
-    return `${a.symbol} ${COND[a.cond]} ${d && d.type === 'hline' ? '水平线 ' + fmtPx(d.p1.p) : d && d.type === 'ray' ? '射线' : '趋势线'}`;
+    return `${a.symbol} ${COND[a.cond]} ${d && d.type === 'hline' ? _t('水平线 ') + fmtPx(d.p1.p) : d && d.type === 'ray' ? _t('射线') : _t('趋势线')}`;
   }
-  const hhmmss = (t) => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
-  const fullTime = (t) => new Date(t).toLocaleString('zh-CN', { hour12: false });
+  const hhmmss = (t) => new Date(t).toLocaleTimeString(Prefs.locale, { hour12: false });
+  const fullTime = (t) => new Date(t).toLocaleString(Prefs.locale, { hour12: false });
   // ---------- 推送到手机 / Discord ----------
   // 都用浏览器能直接发的“简单请求”，不需要后台服务；Discord 和 Bark 没有跨域回应，只能确认“已发出”
   async function sendPush(title, body, cfg) {
@@ -1021,25 +1045,25 @@
       try {
         const r = await fetch(server + '/', { method: 'POST', body: JSON.stringify({ topic, title, message: body, tags: ['chart_with_upwards_trend'], priority: 4 }) });
         out.push({ name: 'ntfy', ok: r.ok, err: 'HTTP ' + r.status });
-      } catch (e) { out.push({ name: 'ntfy', ok: false, err: '连不上' }); }
+      } catch (e) { out.push({ name: 'ntfy', ok: false, err: _t('连不上') }); }
     }
     if (cfg.discord) {
       try {
-        const fd = new FormData(); fd.append('payload_json', JSON.stringify({ content: `**${title}**\n${body}`, username: '观潮看盘' }));
+        const fd = new FormData(); fd.append('payload_json', JSON.stringify({ content: `**${title}**\n${body}`, username: _t('观潮看盘') }));
         await fetch(cfg.discord, { method: 'POST', body: fd, mode: 'no-cors' }); out.push({ name: 'Discord', ok: null });
-      } catch (e) { out.push({ name: 'Discord', ok: false, err: '连不上' }); }
+      } catch (e) { out.push({ name: 'Discord', ok: false, err: _t('连不上') }); }
     }
     if (cfg.bark) {
       const base = /^https?:\/\//.test(cfg.bark) ? cfg.bark.replace(/\/+$/, '') : 'https://api.day.app/' + cfg.bark;
-      try { await fetch(`${base}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?group=${encodeURIComponent('观潮看盘')}`, { mode: 'no-cors' }); out.push({ name: 'Bark', ok: null }); }
-      catch (e) { out.push({ name: 'Bark', ok: false, err: '连不上' }); }
+      try { await fetch(`${base}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?group=${encodeURIComponent(_t('观潮看盘'))}`, { mode: 'no-cors' }); out.push({ name: 'Bark', ok: null }); }
+      catch (e) { out.push({ name: 'Bark', ok: false, err: _t('连不上') }); }
     }
     return out;
   }
   function fireAlert(a, p, lv, dir) {
     const title = `🔔 ${a.symbol} ${dir} ${fmtPx(lv)}`;
-    const body = `现价 ${fmtPx(p)} · ${a.kind === 'line' ? '画线警报' : '到价警报'} · ${hhmmss(Date.now())}` + (a.repeat === 'every' ? '' : '（已自动关闭）');
-    state.alertLog.unshift({ t: Date.now(), text: `${a.symbol} ${dir} ${fmtPx(lv)}，现价 ${fmtPx(p)}` });
+    const body = _t("现价 {0} · {1} · {2}", [fmtPx(p), a.kind === 'line' ? _t('画线警报') : _t('到价警报'), hhmmss(Date.now())]) + (a.repeat === 'every' ? '' : _t('（已自动关闭）'));
+    state.alertLog.unshift({ t: Date.now(), text: _t("{0} {1} {2}，现价 {3}", [a.symbol, dir, fmtPx(lv), fmtPx(p)]) });
     state.alertLog.length = Math.min(state.alertLog.length, 30);
     alertToast(title, body, true);
     beep();
@@ -1051,7 +1075,7 @@
   function alertToast(title, body, sticky) {
     const box = $('toasts');
     const el = document.createElement('div'); el.className = 'toast';
-    el.innerHTML = `<b>${esc(title)}</b><div>${esc(body)}</div><button title="关闭">×</button>`;
+    el.innerHTML = _t("<b>{0}</b><div>{1}</div><button title=\"关闭\">×</button>", [esc(title), esc(body)]);
     el.querySelector('button').onclick = () => el.remove();
     box.prepend(el);
     while (box.children.length > 5) box.lastChild.remove();
@@ -1086,14 +1110,19 @@
   function addAlert(a) {
     state.alerts.push({ id: uid('a'), market: state.market, repeat: 'once', active: true, created: Date.now(), ...a });
     alertsChanged(); askNotify(); startTickers();
-    alertToast('已添加警报', alertTitle(state.alerts[state.alerts.length - 1]));
+    alertToast(_t('已添加警报'), alertTitle(state.alerts[state.alerts.length - 1]));
   }
-  function alertsChanged() { save(); pushChartAlerts(); renderAlertPanel(); renderWatchlist(); renderBadge(); }
+  function alertsChanged() { pushChartAlerts(); save(); renderAlertPanel(); renderWatchlist(); renderBadge(); }
   function renderBadge() {
     const n = state.alerts.filter((a) => a.active).length, b = $('alert-count');
     b.hidden = !n; b.textContent = n;
   }
   function pushChartAlerts() {
+    for (const a of state.alerts) {
+      if (a.kind !== 'line' || a.market !== state.market) continue;
+      const d = drawingOf(a), c = d && visibleCells().find((x) => x.symbol === a.symbol && x.chart.bars.length);
+      if (c) noteLineRef(a, d, c.chart);
+    }
     for (const c of visibleCells()) {
       c.chart.setAlerts(state.alerts.filter((a) => a.market === state.market && a.symbol === c.symbol && (a.active || a.kind === 'price'))
         .map((a) => ({ price: a.price, drawingId: a.kind === 'line' ? a.drawingId : null, active: a.active, text: a.kind === 'line' ? COND[a.cond] : null })));
@@ -1112,14 +1141,14 @@
     $('ind-menu').classList.remove('open'); $('alert-menu').classList.add('open'); renderAlertPanel(true);
   };
   function renderLineBox(box, d) {
-    if (!d) { box.innerHTML = '<span>画线警报：先在图上画一条水平线或趋势线并点选它，就能在这里给它设警报（左侧工具栏的 🔔 也可以）。</span>'; return; }
+    if (!d) { box.innerHTML = _t('<span>画线警报：先在图上画一条水平线或趋势线并点选它，就能在这里给它设警报（左侧工具栏的 🔔 也可以）。</span>'); return; }
     const c = activeCell(), lv = c.chart.drawingPriceAt(d, Date.now());
-    box.innerHTML = `<span>选中的${{ hline: '水平线', trend: '趋势线', ray: '射线' }[d.type]}（${esc(c.symbol)}，现在约 ${fmtPx(lv)}）</span>` +
-      '<select id="al-line-cond"><option value="cross">穿越</option><option value="up">上穿</option><option value="down">下穿</option></select>' +
-      '<select id="al-line-rep"><option value="once">仅一次</option><option value="every">每次</option></select>' +
-      '<button class="btn primary" id="al-line-add">设警报</button>';
+    box.innerHTML = _t("<span>选中的{0}（{1}，现在约 {2}）</span>", [{ hline: _t('水平线'), trend: _t('趋势线'), ray: _t('射线') }[d.type], esc(c.symbol), fmtPx(lv)]) +
+      _t('<select id="al-line-cond"><option value="cross">穿越</option><option value="up">上穿</option><option value="down">下穿</option></select>') +
+      _t('<select id="al-line-rep"><option value="once">仅一次</option><option value="every">每次</option></select>') +
+      _t('<button class="btn primary" id="al-line-add">设警报</button>');
     box.querySelector('#al-line-add').onclick = () => {
-      if (state.alerts.some((a) => a.kind === 'line' && a.drawingId === d.id && a.active)) { alertToast('这条线已经有警报了', '可以在下面的列表里停用或删除。'); return; }
+      if (state.alerts.some((a) => a.kind === 'line' && a.drawingId === d.id && a.active)) { alertToast(_t('这条线已经有警报了'), _t('可以在下面的列表里停用或删除。')); return; }
       addAlert({ kind: 'line', symbol: c.symbol, drawingId: d.id, cond: box.querySelector('#al-line-cond').value, repeat: box.querySelector('#al-line-rep').value });
     };
   }
@@ -1130,21 +1159,21 @@
     const old = { sym: $('alert-sym') && $('alert-sym').value, price: $('alert-price') && $('alert-price').value };
     alertPanel.innerHTML = '';
     const head = document.createElement('div'); head.className = 'ind-head';
-    head.innerHTML = '<b>价格警报</b><small>触发时：页面弹窗 + 提示音 + 系统通知</small>';
+    head.innerHTML = _t('<b>价格警报</b><small>触发时：页面弹窗 + 提示音 + 系统通知</small>');
     const f = document.createElement('form'); f.className = 'al-form';
-    f.innerHTML = '<label>品种<input id="alert-sym" autocomplete="off" spellcheck="false" style="text-transform:uppercase"></label>' +
-      '<label>价格<input id="alert-price" type="number" step="any"></label>' +
-      '<label>条件<select id="alert-cond"><option value="cross">到价（自动判断涨到/跌到）</option><option value="up">上穿（涨到）</option><option value="down">下穿（跌到）</option></select></label>' +
-      '<label>提醒次数<select id="alert-rep"><option value="once">仅一次（触发后自动关闭）</option><option value="every">每次穿过都提醒</option></select></label>' +
-      '<div class="row"><button class="btn primary">+ 添加到价警报</button></div>';
+    f.innerHTML = _t('<label>品种<input id="alert-sym" autocomplete="off" spellcheck="false" style="text-transform:uppercase"></label>') +
+      _t('<label>价格<input id="alert-price" type="number" step="any"></label>') +
+      _t('<label>条件<select id="alert-cond"><option value="cross">到价（自动判断涨到/跌到）</option><option value="up">上穿（涨到）</option><option value="down">下穿（跌到）</option></select></label>') +
+      _t('<label>提醒次数<select id="alert-rep"><option value="once">仅一次（触发后自动关闭）</option><option value="every">每次穿过都提醒</option></select></label>') +
+      _t('<div class="row"><button class="btn primary">+ 添加到价警报</button></div>');
     f.querySelector('#alert-sym').value = !fresh && old.sym ? old.sym : (c ? c.symbol : '');
     f.querySelector('#alert-price').value = !fresh && old.price ? old.price : (px != null ? fmtPx(px) : '');
     f.onsubmit = async (e) => {
       e.preventDefault();
       const s = feed().normalizeSymbol(f.querySelector('#alert-sym').value), p = Number(f.querySelector('#alert-price').value);
-      if (!s || !isFinite(p) || p <= 0) { alertToast('请填写品种和价格', '价格要大于 0。'); return; }
+      if (!s || !isFinite(p) || p <= 0) { alertToast(_t('请填写品种和价格'), _t('价格要大于 0。')); return; }
       const known = wantedSyms().includes(s) || (await feed().validateSymbol(s).catch(() => false));
-      if (!known) { alertToast('找不到这个代码', s); return; }
+      if (!known) { alertToast(_t('找不到这个代码'), s); return; }
       let cond = f.querySelector('#alert-cond').value;
       const cur = lastPx[state.market + ':' + s] ?? (tickers[s] && tickers[s].last);
       if (cond === 'cross' && cur != null) cond = p >= cur ? 'up' : 'down'; // 按现价自动判断方向
@@ -1157,17 +1186,17 @@
     // 列表
     const list = document.createElement('div'); list.className = 'al-list';
     const sorted = state.alerts.slice().sort((x, y) => (y.active - x.active) || (y.created - x.created));
-    if (!sorted.length) { const e = document.createElement('div'); e.className = 'ind-empty'; e.textContent = '还没有警报'; list.appendChild(e); }
+    if (!sorted.length) { const e = document.createElement('div'); e.className = 'ind-empty'; e.textContent = _t('还没有警报'); list.appendChild(e); }
     for (const a of sorted) {
       const row = document.createElement('div'); row.className = 'al-row' + (a.active ? '' : ' off');
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = a.active; cb.title = '启用 / 停用';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = a.active; cb.title = _t('启用 / 停用');
       cb.onchange = () => { a.active = cb.checked; if (a.active) a.lastAt = 0; alertsChanged(); startTickers(); };
       const desc = document.createElement('span'); desc.className = 'al-desc';
-      const status = a.active ? (a.repeat === 'every' ? '生效中 · 每次穿过都提醒' : '生效中 · 仅一次') : (a.lastAt ? `已触发 ${fullTime(a.lastAt)}` : '已停用');
-      desc.innerHTML = `<span class="al-tag">${a.market === 'us' ? '美股' : '币'}</span>${esc(alertTitle(a))}<small>${status}</small>`;
-      desc.style.cursor = 'pointer'; desc.title = '在当前图打开';
+      const status = a.active ? (a.repeat === 'every' ? _t('生效中 · 每次穿过都提醒') : _t('生效中 · 仅一次')) : (a.lastAt ? _t("已触发 {0}", [fullTime(a.lastAt)]) : _t('已停用'));
+      desc.innerHTML = `<span class="al-tag">${a.market === 'us' ? _t('美股') : _t('币')}</span>${esc(alertTitle(a))}<small>${status}</small>`;
+      desc.style.cursor = 'pointer'; desc.title = _t('在当前图打开');
       desc.onclick = () => { if (a.market === state.market) openSymbol(a.symbol); };
-      const del = document.createElement('button'); del.className = 'ind-del'; del.textContent = '×'; del.title = '删除';
+      const del = document.createElement('button'); del.className = 'ind-del'; del.textContent = '×'; del.title = _t('删除');
       del.onclick = () => { state.alerts = state.alerts.filter((x) => x !== a); alertsChanged(); startTickers(); };
       row.append(cb, desc, del); list.appendChild(row);
     }
@@ -1175,13 +1204,13 @@
     // 通知状态 + 试听 + 最近触发
     const foot = document.createElement('div'); foot.className = 'al-foot';
     const perm = window.Notification ? Notification.permission : 'unsupported';
-    foot.innerHTML = `<span>系统通知：${{ granted: '已开启', denied: '被拒绝（可在浏览器的网站设置里打开）', default: '未开启', unsupported: '此浏览器不支持' }[perm]}</span>`;
-    if (perm === 'default') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = '开启系统通知'; b.onclick = askNotify; foot.appendChild(b); }
-    const t = document.createElement('button'); t.className = 'btn'; t.textContent = '试听提示音'; t.onclick = beep; foot.appendChild(t);
+    foot.innerHTML = _t("<span>系统通知：{0}</span>", [{ granted: _t('已开启'), denied: _t('被拒绝（可在浏览器的网站设置里打开）'), default: _t('未开启'), unsupported: _t('此浏览器不支持') }[perm]]);
+    if (perm === 'default') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = _t('开启系统通知'); b.onclick = askNotify; foot.appendChild(b); }
+    const t = document.createElement('button'); t.className = 'btn'; t.textContent = _t('试听提示音'); t.onclick = beep; foot.appendChild(t);
     alertPanel.appendChild(foot);
     if (state.alertLog.length) {
       const lg = document.createElement('div'); lg.className = 'al-log';
-      lg.innerHTML = '<b>最近触发</b><br>' + state.alertLog.slice(0, 5).map((x) => `${fullTime(x.t)}　${esc(x.text)}`).join('<br>');
+      lg.innerHTML = _t('<b>最近触发</b><br>') + state.alertLog.slice(0, 5).map((x) => `${fullTime(x.t)}　${esc(x.text)}`).join('<br>');
       alertPanel.appendChild(lg);
     }
     renderBadge();
@@ -1195,7 +1224,11 @@
     if (!syms.length) return;
     const f = feedOf(other);
     if (f === Feeds.AlpacaFeed && !f.hasKey()) return;
-    unsubOther = f.subscribeTickers(syms, (s, t) => onPrice(other, s, t.last));
+    // 美股盘前盘后的成交走 onExt：和看美股时一样，开着「盘前盘后」才触发
+    unsubOther = f.subscribeTickers(syms, (s, t) => onPrice(other, s, t.last), (s, x) => {
+      if (x.session === 'rth' || x.session === 'closed') return;
+      onPrice(other, s, x.price, !state.extHours);
+    });
   }
 
   // =====================================================================
@@ -1205,8 +1238,8 @@
   let scResults = [];
   $('sc-btn').onclick = () => { $('sc-status').textContent = scHint(); scDlg.showModal(); };
   const scHint = () => state.market === 'us'
-    ? '用日线数据计算。美股免费版的日线截至约 15 分钟前（全市场数据），盘中最新几分钟的变化不在里面。'
-    : '用 OKX 日线（按 UTC 0 点切日）计算，所以“今日涨跌”和自选里的 24 小时涨跌不完全一样。';
+    ? _t('用日线数据计算。美股免费版的日线截至约 15 分钟前（全市场数据），盘中最新几分钟的变化不在里面。')
+    : _t('用 OKX 日线（按 UTC 0 点切日）计算，所以“今日涨跌”和自选里的 24 小时涨跌不完全一样。');
   $('sc-scope').onchange = () => { $('sc-custom').hidden = $('sc-scope').value !== 'custom'; };
   function scSymbols() {
     const scope = $('sc-scope').value;
@@ -1224,18 +1257,18 @@
     const rsi = Indicators.rsi(C, 14); r.rsi = rsi[n - 1];
     const checks = [];
     const on = (id) => $(id).checked;
-    if (on('sc-up')) checks.push([r.chg >= num('sc-up-v'), `涨 ≥ ${num('sc-up-v')}%`]);
-    if (on('sc-dn')) checks.push([r.chg <= -num('sc-dn-v'), `跌 ≥ ${num('sc-dn-v')}%`]);
-    if (on('sc-vol')) checks.push([r.volRatio != null && r.volRatio >= num('sc-vol-v'), `放量 ${num('sc-vol-v')} 倍`]);
-    if (on('sc-above')) { const k = Math.round(num('sc-above-v')), m = Indicators.sma(C, k)[n - 1]; checks.push([m != null && last.c > m, `站上 MA${k}`]); }
-    if (on('sc-below')) { const k = Math.round(num('sc-below-v')), m = Indicators.sma(C, k)[n - 1]; checks.push([m != null && last.c < m, `跌破 MA${k}`]); }
+    if (on('sc-up')) checks.push([r.chg >= num('sc-up-v'), _t("涨 ≥ {0}%", [num('sc-up-v')])]);
+    if (on('sc-dn')) checks.push([r.chg <= -num('sc-dn-v'), _t("跌 ≥ {0}%", [num('sc-dn-v')])]);
+    if (on('sc-vol')) checks.push([r.volRatio != null && r.volRatio >= num('sc-vol-v'), _t("放量 {0} 倍", [num('sc-vol-v')])]);
+    if (on('sc-above')) { const k = Math.round(num('sc-above-v')), m = Indicators.sma(C, k)[n - 1]; checks.push([m != null && last.c > m, _t("站上 MA{0}", [k])]); }
+    if (on('sc-below')) { const k = Math.round(num('sc-below-v')), m = Indicators.sma(C, k)[n - 1]; checks.push([m != null && last.c < m, _t("跌破 MA{0}", [k])]); }
     if (on('sc-cross')) {
       const k = Math.round(num('sc-cross-v')), d = Math.round(num('sc-cross-d')), m = Indicators.sma(C, k);
       let hit = false; for (let j = Math.max(1, n - d); j < n; j++) if (m[j - 1] != null && C[j - 1] <= m[j - 1] && C[j] > m[j]) hit = true;
-      checks.push([hit, `${d} 天内上穿 MA${k}`]);
+      checks.push([hit, _t("{0} 天内上穿 MA{1}", [d, k])]);
     }
-    if (on('sc-high')) { const k = Math.round(num('sc-high-v')), hh = Math.max(...bars.slice(Math.max(0, n - 1 - k), n - 1).map((b) => b.h)); checks.push([n > k && last.h >= hh, `创 ${k} 日新高`]); }
-    if (on('sc-low')) { const k = Math.round(num('sc-low-v')), ll = Math.min(...bars.slice(Math.max(0, n - 1 - k), n - 1).map((b) => b.l)); checks.push([n > k && last.l <= ll, `创 ${k} 日新低`]); }
+    if (on('sc-high')) { const k = Math.round(num('sc-high-v')), hh = Math.max(...bars.slice(Math.max(0, n - 1 - k), n - 1).map((b) => b.h)); checks.push([n > k && last.h >= hh, _t("创 {0} 日新高", [k])]); }
+    if (on('sc-low')) { const k = Math.round(num('sc-low-v')), ll = Math.min(...bars.slice(Math.max(0, n - 1 - k), n - 1).map((b) => b.l)); checks.push([n > k && last.l <= ll, _t("创 {0} 日新低", [k])]); }
     if (on('sc-rsihi')) checks.push([r.rsi != null && r.rsi >= num('sc-rsihi-v'), `RSI ≥ ${num('sc-rsihi-v')}`]);
     if (on('sc-rsilo')) checks.push([r.rsi != null && r.rsi <= num('sc-rsilo-v'), `RSI ≤ ${num('sc-rsilo-v')}`]);
     r.hits = checks.filter((x) => x[0]).map((x) => x[1]);
@@ -1244,18 +1277,18 @@
   }
   $('sc-run').onclick = async () => {
     const syms = scSymbols(), st = $('sc-status');
-    if (!syms.length) { st.textContent = '没有要扫描的品种'; return; }
-    if (feed() === Feeds.AlpacaFeed && !feed().hasKey()) { st.textContent = '请先在设置里填 Alpaca API Key'; return; }
-    st.textContent = `正在获取 ${syms.length} 个品种的日线…`; $('sc-run').disabled = true;
+    if (!syms.length) { st.textContent = _t('没有要扫描的品种'); return; }
+    if (feed() === Feeds.AlpacaFeed && !feed().hasKey()) { st.textContent = _t('请先在设置里填 Alpaca API Key'); return; }
+    st.textContent = _t("正在获取 {0} 个品种的日线…", [syms.length]); $('sc-run').disabled = true;
     let data = {};
-    try { data = await feed().dailyBars(syms, 260, (k) => (st.textContent = `正在获取日线… ${k}/${syms.length}`)); }
-    catch (e) { st.textContent = '获取数据失败：' + e.message; $('sc-run').disabled = false; return; }
+    try { data = await feed().dailyBars(syms, 260, (k) => (st.textContent = _t("正在获取日线… {0}/{1}", [k, syms.length]))); }
+    catch (e) { st.textContent = _t('获取数据失败：') + e.message; $('sc-run').disabled = false; return; }
     $('sc-run').disabled = false;
     scResults = [];
     const missing = [];
     for (const s of syms) { const r = data[s] && scEval(data[s]); if (!r) missing.push(s); else if (r.pass) scResults.push({ s, ...r }); }
     scResults.sort((a, b) => b.chg - a.chg);
-    st.textContent = `扫描了 ${syms.length - missing.length} 个，符合条件 ${scResults.length} 个` + (missing.length ? `（${missing.join('、')} 没有数据）` : '');
+    st.textContent = _t("扫描了 {0} 个，符合条件 {1} 个", [syms.length - missing.length, scResults.length]) + (missing.length ? _t("（{0} 没有数据）", [missing.join(Prefs.listSep)]) : '');
     renderScResults();
   };
   function renderScResults() {
@@ -1263,18 +1296,18 @@
     for (const r of scResults) {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td class="sym">${esc(r.s)}</td><td>${fmtPx(r.last)}</td><td class="${r.chg >= 0 ? 'up' : 'down'}">${fmtPct(r.chg)}</td>` +
-        `<td>${r.volRatio == null ? '—' : r.volRatio.toFixed(2)}</td><td>${r.rsi == null ? '—' : r.rsi.toFixed(1)}</td><td class="tags">${r.hits.map(esc).join('、') || '—'}</td>`;
-      tr.title = '点击在当前图打开';
+        `<td>${r.volRatio == null ? '—' : r.volRatio.toFixed(2)}</td><td>${r.rsi == null ? '—' : r.rsi.toFixed(1)}</td><td class="tags">${r.hits.map(esc).join(Prefs.listSep) || '—'}</td>`;
+      tr.title = _t('点击在当前图打开');
       tr.onclick = () => { openSymbol(r.s); };
       tb.appendChild(tr);
     }
     $('sc-save').disabled = !scResults.length;
   }
   $('sc-save').onclick = () => {
-    const name = (prompt('把筛选结果存为新列表，名字：', '筛选 ' + new Date().toLocaleDateString('zh-CN')) || '').trim(); if (!name) return;
+    const name = (prompt(_t('把筛选结果存为新列表，名字：'), _t('筛选 ') + new Date().toLocaleDateString(Prefs.locale)) || '').trim(); if (!name) return;
     const l = { id: uid('l'), name, items: scResults.map((r) => sym(r.s)) };
     M().lists.push(l); M().activeList = l.id; save(); renderWatchlist(); startTickers();
-    $('sc-status').textContent = `已存为列表「${name}」`;
+    $('sc-status').textContent = _t("已存为列表「{0}」", [name]);
   };
 
   // ---------- 多窗口：Alpaca 免费账号只允许一条行情连接，新打开的窗口接管，旧窗口暂停 ----------
@@ -1286,7 +1319,7 @@
     Feeds.AlpacaFeed.pause();
     if (state.market === 'us') {
       setStatus('paused');
-      showBanner('观潮看盘在另一个窗口打开了，这个窗口的美股实时推送已暂停（Alpaca 免费账号同时只能有一个连接）。', '在这个窗口继续', () => { claimAlpaca(); showBanner(''); });
+      showBanner(_t('观潮看盘在另一个窗口打开了，这个窗口的美股实时推送已暂停（Alpaca 免费账号同时只能有一个连接）。'), _t('在这个窗口继续'), () => { claimAlpaca(); showBanner(''); });
     }
   };
 
@@ -1300,8 +1333,8 @@
       vprofile: !!state.vprofile, compares: (m.compares || []).slice(), events: state.events !== false, sync: state.sync !== false, at: Date.now() };
   }
   const IV_LABEL = Object.fromEntries(INTERVALS);
-  const ivDesc = (y) => { const l = (y.ivs && y.ivs.length ? [...new Set(y.ivs)] : [y.range === 'ytd' ? 'ytd' : y.interval]).map((x) => IV_LABEL[x] || x); return l.length > 2 ? '多周期' : l.join('/'); };
-  const layoutDesc = (y) => `${y.market === 'us' ? '美股' : '加密'} · ${y.layout === 1 ? '1 图' : y.layout + ' 图'} · ${ivDesc(y)} · ${y.indicators.length} 个指标`;
+  const ivDesc = (y) => { const l = (y.ivs && y.ivs.length ? [...new Set(y.ivs)] : [y.range === 'ytd' ? 'ytd' : y.interval]).map((x) => IV_LABEL[x] || x); return l.length > 2 ? _t('多周期') : l.join('/'); };
+  const layoutDesc = (y) => _t("{0} · {1} · {2} · {3} 个指标", [y.market === 'us' ? _t('美股') : _t('加密'), y.layout === 1 ? _t('1 图') : y.layout + _t(' 图'), ivDesc(y), y.indicators.length]);
   function applySavedLayout(y) {
     state.market = y.market;
     const m = M();
@@ -1322,32 +1355,32 @@
   function renderLayoutPanel() {
     const box = $('lay-panel'); box.innerHTML = '';
     const head = document.createElement('div'); head.className = 'ind-head';
-    head.innerHTML = '<b>布局</b><small>点名字一键切换；保存的是当前所有图的设置</small>';
+    head.innerHTML = _t('<b>布局</b><small>点名字一键切换；保存的是当前所有图的设置</small>');
     box.appendChild(head);
     const ul = document.createElement('div'); ul.className = 'lay-list';
-    if (!state.layouts.length) ul.innerHTML = '<div class="lay-empty">还没有保存的布局。先把图摆好，在下面起个名字保存。</div>';
+    if (!state.layouts.length) ul.innerHTML = _t('<div class="lay-empty">还没有保存的布局。先把图摆好，在下面起个名字保存。</div>');
     for (const y of state.layouts) {
       const row = document.createElement('div'); row.className = 'lay-row' + (y.id === state.curLayout ? ' on' : '');
-      row.innerHTML = `<button class="lay-go" title="切换到这个布局"><b>${esc(y.name)}</b><small>${esc(layoutDesc(y))}</small></button>` +
-        '<button class="lay-act" data-a="over" title="用当前的图覆盖这个布局">覆盖</button><button class="lay-act" data-a="ren" title="改名">改名</button><button class="lay-act" data-a="del" title="删除">删除</button>';
+      row.innerHTML = _t("<button class=\"lay-go\" title=\"切换到这个布局\"><b>{0}</b><small>{1}</small></button>", [esc(y.name), esc(layoutDesc(y))]) +
+        _t('<button class="lay-act" data-a="over" title="用当前的图覆盖这个布局">覆盖</button><button class="lay-act" data-a="ren" title="改名">改名</button><button class="lay-act" data-a="del" title="删除">删除</button>');
       row.querySelector('.lay-go').onclick = () => { $('lay-menu').classList.remove('open'); applySavedLayout(y); };
       row.querySelectorAll('.lay-act').forEach((b) => (b.onclick = (e) => {
         e.stopPropagation();
         const a = b.dataset.a, k = state.layouts.indexOf(y);
-        if (a === 'over') { state.layouts[k] = snapshotLayout(y.name, y.id); state.curLayout = y.id; save(); renderLayoutPanel(); alertToast('布局已更新', y.name); }
-        if (a === 'ren') { const n = prompt('布局名字：', y.name); if (n && n.trim()) { y.name = n.trim().slice(0, 30); save(); renderLayoutPanel(); } }
+        if (a === 'over') { state.layouts[k] = snapshotLayout(y.name, y.id); state.curLayout = y.id; save(); renderLayoutPanel(); alertToast(_t('布局已更新'), y.name); }
+        if (a === 'ren') { const n = prompt(_t('布局名字：'), y.name); if (n && n.trim()) { y.name = n.trim().slice(0, 30); save(); renderLayoutPanel(); } }
         if (a === 'del') {
           if (b.dataset.sure) { state.layouts.splice(k, 1); if (state.curLayout === y.id) state.curLayout = null; save(); renderLayoutPanel(); }
-          else { b.dataset.sure = '1'; b.textContent = '确认删除'; b.classList.add('danger'); setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = '删除'; b.classList.remove('danger'); } }, 3000); }
+          else { b.dataset.sure = '1'; b.textContent = _t('确认删除'); b.classList.add('danger'); setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = _t('删除'); b.classList.remove('danger'); } }, 3000); }
         }
       }));
       ul.appendChild(row);
     }
     box.appendChild(ul);
     const add = document.createElement('div'); add.className = 'ind-add lay-add';
-    add.innerHTML = '<input type="text" id="lay-name" placeholder="新布局名字，如 科技股 4 图" maxlength="30"><button class="btn primary" id="lay-save">保存当前</button>';
+    add.innerHTML = _t('<input type="text" id="lay-name" placeholder="新布局名字，如 科技股 4 图" maxlength="30"><button class="btn primary" id="lay-save">保存当前</button>');
     const doSave = () => {
-      const inp = add.querySelector('#lay-name'), name = inp.value.trim() || `布局 ${state.layouts.length + 1}`;
+      const inp = add.querySelector('#lay-name'), name = inp.value.trim() || _t("布局 {0}", [state.layouts.length + 1]);
       const y = snapshotLayout(name); state.layouts.push(y); state.curLayout = y.id; save(); renderLayoutPanel();
     };
     add.querySelector('#lay-save').onclick = doSave;
@@ -1363,7 +1396,7 @@
   document.addEventListener('pointerdown', (e) => { if (!ctxMenu.hidden && !ctxMenu.contains(e.target)) closeCtx(); }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
   window.addEventListener('blur', closeCtx); window.addEventListener('resize', closeCtx);
-  const DRAW_NAME = { hline: '水平线', trend: '趋势线', ray: '射线', channel: '平行通道', rect: '矩形', fib: '斐波那契回撤', fibext: '斐波那契扩展', text: '文字标注', measure: '测量' };
+  const DRAW_NAME = { hline: _t('水平线'), trend: _t('趋势线'), ray: _t('射线'), channel: _t('平行通道'), rect: _t('矩形'), fib: _t('斐波那契回撤'), fibext: _t('斐波那契扩展'), text: _t('文字标注'), measure: _t('测量') };
   const DRAW_COLORS = ['#ffb547', '#ffffff', '#5ab0ff', '#2ebd85', '#f0506e', '#b48cff', '#4fd1c5', '#ff8f5a'];
   const newId = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   async function copyText(t) {
@@ -1378,54 +1411,54 @@
     const row = (label, html, bind) => items.push({ row: true, label, html, bind });
     const d = info.drawing;
     if (d) {
-      items.push({ head: DRAW_NAME[d.type] || '画线' });
-      if (d.type !== 'measure') row('颜色', DRAW_COLORS.map((col) => `<button class="sw${(d.color || '#ffb547') === col ? ' on' : ''}" data-col="${col}" style="background:${col}" title="${col}"></button>`).join(''),
+      items.push({ head: DRAW_NAME[d.type] || _t('画线') });
+      if (d.type !== 'measure') row(_t('颜色'), DRAW_COLORS.map((col) => `<button class="sw${(d.color || '#ffb547') === col ? ' on' : ''}" data-col="${col}" style="background:${col}" title="${col}"></button>`).join(''),
         (el) => el.querySelectorAll('.sw').forEach((b) => (b.onclick = () => { d.color = b.dataset.col; ch.drawingsChanged(); closeCtx(); })));
       if (['hline', 'trend', 'ray'].includes(d.type)) {
         const has = state.alerts.some((a) => a.kind === 'line' && a.drawingId === d.id && a.active);
-        if (has) item('🔔', '这条线已有警报（在「警报」里管理）', () => { $('alert-btn').click(); }, 'muted');
-        else item('🔔', '给这条线设警报（穿越时提醒）', () => addAlert({ kind: 'line', symbol: c.symbol, drawingId: d.id, cond: 'cross', repeat: 'once' }));
+        if (has) item('🔔', _t('这条线已有警报（在「警报」里管理）'), () => { $('alert-btn').click(); }, 'muted');
+        else item('🔔', _t('给这条线设警报（穿越时提醒）'), () => addAlert({ kind: 'line', symbol: c.symbol, drawingId: d.id, cond: 'cross', repeat: 'once' }));
       }
-      if (d.type === 'text') item('✎', '修改文字', () => { const t = prompt('标注文字：', d.text); if (t) { d.text = t; ch.drawingsChanged(); } });
-      item(d.locked ? '🔓' : '🔒', d.locked ? '解锁（可以拖动）' : '锁定（防止误拖动）', () => { d.locked = !d.locked; ch.drawingsChanged(); });
-      item('⧉', '复制一份', () => {
+      if (d.type === 'text') item('✎', _t('修改文字'), () => { const t = prompt(_t('标注文字：'), d.text); if (t) { d.text = t; ch.drawingsChanged(); } });
+      item(d.locked ? '🔓' : '🔒', d.locked ? _t('解锁（可以拖动）') : _t('锁定（防止误拖动）'), () => { d.locked = !d.locked; ch.drawingsChanged(); });
+      item('⧉', _t('复制一份'), () => {
         const cp = JSON.parse(JSON.stringify(d)); cp.id = newId(); cp.locked = false;
         const S = ch._S, dp = S ? (S.max - S.min) * 0.03 : 0;
         for (const k of ['p1', 'p2', 'p3']) if (cp[k]) cp[k].p -= dp;
         ch.addDrawing(cp);
       });
       sep();
-      item('🗑', '删除', () => ch.deleteSelected(), 'danger');
+      item('🗑', _t('删除'), () => ch.deleteSelected(), 'danger');
     } else {
       const p = info.price;
       if (p != null && (info.area === 'main' || info.area === 'price')) {
         const ps = fmtPx(p);
-        items.push({ head: `${c.symbol} · 价格 ${ps}` });
-        item('🔔', `在 ${ps} 设警报`, () => {
+        items.push({ head: _t("{0} · 价格 {1}", [c.symbol, ps]) });
+        item('🔔', _t("在 {0} 设警报", [ps]), () => {
           const cur = cellPrice(c);
           addAlert({ kind: 'price', symbol: c.symbol, price: Number(ps), cond: cur != null && Number(ps) < cur ? 'down' : 'up', repeat: 'once' });
         });
-        item('─', `在 ${ps} 画水平线`, () => ch.addDrawing({ id: newId(), type: 'hline', p1: { t: info.t, p: Number(ps) } }));
-        if (info.point) item('T', '在这里加文字标记', () => { const t = prompt('标注文字：', ''); if (t) ch.addDrawing({ id: newId(), type: 'text', p1: info.point, text: t }); });
-        item('📋', `复制价格 ${ps}`, async () => { alertToast(await copyText(ps) ? '已复制' : '复制失败', ps); });
+        item('─', _t("在 {0} 画水平线", [ps]), () => ch.addDrawing({ id: newId(), type: 'hline', p1: { t: info.t, p: Number(ps) } }));
+        if (info.point) item('T', _t('在这里加文字标记'), () => { const t = prompt(_t('标注文字：'), ''); if (t) ch.addDrawing({ id: newId(), type: 'text', p1: info.point, text: t }); });
+        item('📋', _t("复制价格 {0}", [ps]), async () => { alertToast(await copyText(ps) ? _t('已复制') : _t('复制失败'), ps); });
         sep();
       } else items.push({ head: c.symbol });
-      item('⇥', '回到最新', () => ch.goLatest());
-      item('⟲', '重置缩放', () => ch.resetView());
+      item('⇥', _t('回到最新'), () => ch.goLatest());
+      item('⟲', _t('重置缩放'), () => ch.resetView());
       sep();
       const cur = ivKey(c.k);
-      row(M().layout > 1 ? '这个图的周期' : '周期', INTERVALS.map(([id, l]) => `<button class="chip-b${id === cur ? ' on' : ''}" data-iv="${id}">${l}</button>`).join(''),
+      row(M().layout > 1 ? _t('这个图的周期') : _t('周期'), INTERVALS.map(([id, l]) => `<button class="chip-b${id === cur ? ' on' : ''}" data-iv="${id}">${l}</button>`).join(''),
         (el) => el.querySelectorAll('[data-iv]').forEach((b) => (b.onclick = () => { closeCtx(); ivBox.querySelector(`[data-iv="${b.dataset.iv}"]`).click(); })));
-      if (M().layout > 1) item('⊞', `所有图都用「${IV_NAME[cur]}」`, () => { const m = M(); m.ivs = visibleCells().map(() => cur); save(); loadAll(true); });
+      if (M().layout > 1) item('⊞', _t("所有图都用「{0}」", [IV_NAME[cur]]), () => { const m = M(); m.ivs = visibleCells().map(() => cur); save(); loadAll(true); });
       const ct = state.chartType || 'candle';
-      row('K线样式', [['candle', '蜡烛'], ['hollow', '空心'], ['ha', '平均K线'], ['line', '折线'], ['area', '面积']].map(([id, l]) => `<button class="chip-b${id === ct ? ' on' : ''}" data-ct="${id}">${l}</button>`).join(''),
+      row(_t('K线样式'), [['candle', _t('蜡烛')], ['hollow', _t('空心')], ['ha', _t('平均K线')], ['line', _t('折线')], ['area', _t('面积')]].map(([id, l]) => `<button class="chip-b${id === ct ? ' on' : ''}" data-ct="${id}">${l}</button>`).join(''),
         (el) => el.querySelectorAll('[data-ct]').forEach((b) => (b.onclick = () => { closeCtx(); $('ctype').value = b.dataset.ct; $('ctype').onchange(); })));
       sep();
-      item('＋', '添加对比品种…', () => { $('ind-btn').click(); setTimeout(() => { const i = $('cmp-in'); if (i) i.focus(); }, 0); });
-      item('ƒ', '指标设置…', () => $('ind-btn').click());
-      if (state.market === 'us') item(state.events ? '☑' : '☐', '财报 / 分红标记', () => { state.events = !state.events; save(); visibleCells().forEach(loadEvents); renderIndicatorPanel(); });
-      item(state.vprofile ? '☑' : '☐', '成交量分布', () => { state.vprofile = !state.vprofile; save(); cells.forEach((x) => x.chart.setVolumeProfile(state.vprofile)); renderIndicatorPanel(); });
-      if (ch.drawings.length) { sep(); item('🗑', `删除这个图上的全部画线（${ch.drawings.length} 条）`, () => { if (confirm(`删除 ${c.symbol} 上的全部 ${ch.drawings.length} 条画线？`)) ch.clearDrawings(); }, 'danger'); }
+      item('＋', _t('添加对比品种…'), () => { $('ind-btn').click(); setTimeout(() => { const i = $('cmp-in'); if (i) i.focus(); }, 0); });
+      item('ƒ', _t('指标设置…'), () => $('ind-btn').click());
+      if (state.market === 'us') item(state.events ? '☑' : '☐', _t('财报 / 分红标记'), () => { state.events = !state.events; save(); visibleCells().forEach(loadEvents); renderIndicatorPanel(); });
+      item(state.vprofile ? '☑' : '☐', _t('成交量分布'), () => { state.vprofile = !state.vprofile; save(); cells.forEach((x) => x.chart.setVolumeProfile(state.vprofile)); renderIndicatorPanel(); });
+      if (ch.drawings.length) { sep(); item('🗑', _t("删除这个图上的全部画线（{0} 条）", [ch.drawings.length]), () => { if (confirm(_t("删除 {0} 上的全部 {1} 条画线？", [c.symbol, ch.drawings.length]))) ch.clearDrawings(); }, 'danger'); }
     }
     // 渲染
     ctxMenu.innerHTML = '';
@@ -1458,9 +1491,9 @@
     markMarket();
     extBtn.hidden = state.market !== 'us';
     extBtn.classList.toggle('on', state.extHours);
-    document.querySelector('.wl-cols span:last-child').textContent = state.market === 'us' ? '今日涨跌' : '24h涨跌';
-    $('add-input').placeholder = state.market === 'us' ? '添加，如 GOOGL' : '添加，如 ADA';
-    showBanner(usingSim[state.market] ? '演示模式：价格为随机生成，不是真实行情。' : '');
+    document.querySelector('.wl-cols span:last-child').textContent = state.market === 'us' ? _t('今日涨跌') : _t('24h涨跌');
+    $('add-input').placeholder = state.market === 'us' ? _t('添加，如 GOOGL') : _t('添加，如 ADA');
+    showBanner(usingSim[state.market] ? _t('演示模式：价格为随机生成，不是真实行情。') : '');
     setStatus('connecting');
     for (const c of cells) { stopCell(c); c.symbol = null; }
     applyLayout();

@@ -5,11 +5,32 @@
   const SUB_H = 120;     // 每个副图高度
   const PAD = 12;        // 主图上下留白
 
-  const C = {
-    bg: '#0d1117', grid: '#1a2130', axis: '#8b95a7', axisLine: '#263042',
-    up: '#2ebd85', down: '#f0506e', cross: '#6b7790', text: '#d5dbe6',
-    labelBg: '#2a3447', draw: '#ffb547', drawSel: '#ffffff', sep: '#263042',
+  // 画布颜色：深色 / 浅色两套，切换主题时整体替换（C 是同一个对象，所有图下一帧就用上新颜色）
+  const THEMES = {
+    dark: {
+      bg: '#0d1117', grid: '#1a2130', axis: '#8b95a7', axisLine: '#263042',
+      up: '#2ebd85', down: '#f0506e', cross: '#6b7790', text: '#d5dbe6',
+      labelBg: '#2a3447', draw: '#ffb547', drawSel: '#ffffff', sep: '#263042',
+      legendBg: 'rgba(13,17,23,0.72)', tipBg: 'rgba(22,29,41,0.96)', tipBorder: '#3a4760', noteBg: 'rgba(22,29,41,0.88)',
+      alertOff: 'rgba(139,149,167,0.5)', alertOffBg: 'rgba(80,90,110,0.9)', alertText: '#10151e', band: 'rgba(143,155,179,0.06)',
+    },
+    light: {
+      bg: '#ffffff', grid: '#eef1f5', axis: '#57606a', axisLine: '#d0d7de',
+      up: '#0e9f6e', down: '#e03a52', cross: '#8b949e', text: '#1f2328',
+      labelBg: '#3a4350', draw: '#d97f00', drawSel: '#0b1220', sep: '#d0d7de',
+      legendBg: 'rgba(255,255,255,0.8)', tipBg: 'rgba(255,255,255,0.97)', tipBorder: '#afb8c4', noteBg: 'rgba(255,255,255,0.92)',
+      alertOff: 'rgba(87,96,106,0.45)', alertOffBg: 'rgba(110,118,129,0.9)', alertText: '#ffffff', band: 'rgba(87,96,106,0.06)',
+    },
   };
+  const C = { ...THEMES.dark, ...(global.Prefs ? THEMES[global.Prefs.theme] : null) };
+  const charts = new Set();
+  function setTheme(name) {
+    Object.assign(C, THEMES[name] || THEMES.dark);
+    // 十字线标签底色在浅色主题里是深色块，上面的字要用白色
+    C.labelText = name === 'light' ? '#ffffff' : C.text;
+    charts.forEach((ch) => (ch.dirty = true));
+  }
+  setTheme(global.Prefs ? global.Prefs.theme : 'dark');
 
   function niceStep(range, target) {
     const raw = range / Math.max(1, target);
@@ -51,14 +72,15 @@
     t = Math.max(0, Math.min(1, t));
     return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
+  const P = global.Prefs || { paren: (x) => `（${x}）` };
   const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
   const FIBX = [0, 0.382, 0.618, 1, 1.272, 1.618, 2, 2.618];
   const THREE_POINT = new Set(['channel', 'fibext']);
   function fmtSpan(ms) {
     const m = Math.round(ms / 60e3);
-    if (m < 60) return m + ' 分钟';
-    if (m < 1440) return (m / 60).toFixed(m % 60 ? 1 : 0) + ' 小时';
-    return (m / 1440).toFixed(m % 1440 ? 1 : 0) + ' 天';
+    if (m < 60) return m + _t(' 分钟');
+    if (m < 1440) return (m / 60).toFixed(m % 60 ? 1 : 0) + _t(' 小时');
+    return (m / 1440).toFixed(m % 1440 ? 1 : 0) + _t(' 天');
   }
 
   class Chart {
@@ -85,6 +107,7 @@
       this.drag = null;
       this.lastTickAt = 0;
       this.dirty = true;
+      charts.add(this);
       this._bind();
       new ResizeObserver(() => this.resize()).observe(container);
       this.resize();
@@ -94,7 +117,7 @@
         if (!this.dirty) return;
         this.dirty = false;
         try { this.render(); }
-        catch (e) { if (!this._errShown) { this._errShown = true; window.dispatchEvent(new ErrorEvent('error', { error: e, message: '图表绘制出错：' + e.message })); } }
+        catch (e) { if (!this._errShown) { this._errShown = true; window.dispatchEvent(new ErrorEvent('error', { error: e, message: _t('图表绘制出错：') + e.message })); } }
       };
       requestAnimationFrame(loop);
       // 每秒刷新一次，用于 K 线收盘倒计时
@@ -194,6 +217,13 @@
       if (a === b) return d.p2.p;
       return d.p1.p + ((d.p2.p - d.p1.p) * (x - a)) / (b - a);
     }
+    // 画线在最后一根K线之后的走法：{ t, p, perMs }。最后一根之后按K线序号插值就是按时间线性延长，
+    // 记下来以后，图不显示这个品种时也能按图上看到的那条线继续算警报价格
+    drawingRef(d) {
+      if ((d.type !== 'trend' && d.type !== 'ray') || !this.bars.length) return null;
+      const t = this.bars[this.bars.length - 1].t, p = this.drawingPriceAt(d, t), q = this.drawingPriceAt(d, t + this.intervalMs);
+      return { t, p, perMs: (q - p) / this.intervalMs };
+    }
     _drawAlerts(S, plotW) {
       if (!this.alerts || !this.alerts.length) return;
       const ctx = this.ctx;
@@ -207,15 +237,15 @@
           x = Math.min(plotW - 4, this.xOf(this.bars.length - 1, plotW) + 30);
         } else {
           const y = Math.round(S.y(p)) + 0.5;
-          ctx.strokeStyle = a.active ? 'rgba(255,181,71,0.85)' : 'rgba(139,149,167,0.5)'; ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
+          ctx.strokeStyle = a.active ? 'rgba(255,181,71,0.85)' : C.alertOff; ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
           ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); ctx.setLineDash([]);
         }
         const y = S.y(p);
         const t = '🔔 ' + (a.text || p.toFixed(decimalsFor(p)));
         const w = ctx.measureText(t).width + 10;
-        ctx.fillStyle = a.active ? 'rgba(255,181,71,0.9)' : 'rgba(80,90,110,0.9)';
+        ctx.fillStyle = a.active ? 'rgba(255,181,71,0.9)' : C.alertOffBg;
         ctx.fillRect(x - w, y - 9, w, 18);
-        ctx.fillStyle = '#10151e'; ctx.textAlign = 'right'; ctx.fillText(t, x - 5, y);
+        ctx.fillStyle = a.active ? '#10151e' : C.alertText; ctx.textAlign = 'right'; ctx.fillText(t, x - 5, y);
       }
     }
     setDrawings(list) { this.drawings = list; this.selectedId = null; this.dirty = true; this._selChanged(); }
@@ -339,7 +369,7 @@
       ctx.fillStyle = C.bg; ctx.fillRect(0, 0, this.w, this.h);
       if (!this.bars.length) {
         ctx.fillStyle = C.axis; ctx.font = '14px system-ui'; ctx.textAlign = 'center';
-        ctx.fillText(this.opts.emptyText ? this.opts.emptyText() : '加载中…', this.w / 2, this.h / 2);
+        ctx.fillText(this.opts.emptyText ? this.opts.emptyText() : _t('加载中…'), this.w / 2, this.h / 2);
         return;
       }
       const [i0, i1] = this.visibleRange(plotW);
@@ -401,10 +431,10 @@
       const w = Math.max(...lines.map((s) => ctx.measureText(s).width)) + 16, h = lines.length * 17 + 10;
       let x = Math.min(b.x + 12, L.plotW - w - 4), y = Math.max(4, b.y - h - 8);
       if (x < 4) x = 4;
-      ctx.fillStyle = 'rgba(22,29,41,0.96)'; ctx.strokeStyle = '#3a4760'; ctx.lineWidth = 1;
+      ctx.fillStyle = C.tipBg; ctx.strokeStyle = C.tipBorder; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.rect(x + 0.5, y + 0.5, w, h); ctx.fill(); ctx.stroke();
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      lines.forEach((s, k) => { ctx.fillStyle = k ? C.text : '#ffb547'; ctx.font = k ? '12px system-ui' : 'bold 12px system-ui'; ctx.fillText(s, x + 8, y + 6 + k * 17); });
+      lines.forEach((s, k) => { ctx.fillStyle = k ? C.text : C.draw; ctx.font = k ? '12px system-ui' : 'bold 12px system-ui'; ctx.fillText(s, x + 8, y + 6 + k * 17); });
     }
     _drawTimeGrid(L, i0, i1) {
       const ctx = this.ctx, { plotW } = L;
@@ -498,7 +528,7 @@
       const yp = S.y(lo + (poc + 0.5) * step);
       ctx.strokeStyle = 'rgba(255,181,71,0.7)'; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(plotW, yp); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = '#ffb547'; ctx.font = '10px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-      ctx.fillText('POC 成交最密集', plotW - W - 6, yp - 2);
+      ctx.fillText(_t('POC 成交最密集'), plotW - W - 6, yp - 2);
     }
     _drawCandles(S, i0, i1, plotW, B) {
       B = B || this.bars;
@@ -591,7 +621,7 @@
         if (hi === lo) { hi += 1; lo -= 1; }
       }
       const S = this._scale(pane, lo, hi, 6);
-      if (out.band) { ctx.fillStyle = 'rgba(143,155,179,0.06)'; ctx.fillRect(0, S.y(out.band[1]), plotW, S.y(out.band[0]) - S.y(out.band[1])); }
+      if (out.band) { ctx.fillStyle = C.band; ctx.fillRect(0, S.y(out.band[1]), plotW, S.y(out.band[0]) - S.y(out.band[1])); }
       if (out.levels) {
         ctx.strokeStyle = C.grid; ctx.setLineDash([3, 3]); ctx.beginPath();
         for (const v of out.levels) { const y = Math.round(S.y(v)) + 0.5; ctx.moveTo(0, y); ctx.lineTo(plotW, y); }
@@ -624,7 +654,7 @@
       ctx.font = '11px system-ui'; ctx.textBaseline = 'top'; let x = 8;
       const put = (t, col) => {
         const w = ctx.measureText(t).width;
-        ctx.fillStyle = 'rgba(13,17,23,0.72)'; ctx.fillRect(x - 3, pane.top + 4, w + 8, 15);
+        ctx.fillStyle = C.legendBg; ctx.fillRect(x - 3, pane.top + 4, w + 8, 15);
         ctx.fillStyle = col; ctx.fillText(t, x, pane.top + 6); x += w + 10;
       };
       put(Indicators.label(inst), C.axis);
@@ -664,7 +694,7 @@
         const tl = fmtTime(this.indexToTime(i), this.intervalMs, true);
         ctx.font = '11px system-ui'; const tw = ctx.measureText(tl).width + 14;
         ctx.fillStyle = C.labelBg; ctx.fillRect(x - tw / 2, L.plotH + 1, tw, TIME_H - 2);
-        ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tl, x, L.plotH + TIME_H / 2);
+        ctx.fillStyle = C.labelText; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tl, x, L.plotH + TIME_H / 2);
         return;
       }
       const m = this.mouse; if (!m || m.x < 0 || m.y < 0 || m.x >= L.plotW || m.y >= L.plotH || this.drag?.type === 'pan') return;
@@ -680,14 +710,14 @@
         const v = sc.p(m.y);
         const txt = pane.id === 'main' ? v.toFixed(decimalsFor(v)) : (pane.fmt ? pane.fmt(v) : v.toFixed(2));
         ctx.fillStyle = C.labelBg; ctx.fillRect(plotW, y - 10, AXIS_W, 20);
-        ctx.fillStyle = C.text; ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = C.labelText; ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         ctx.fillText(txt, plotW + 6, y);
       }
       // 时间标签
       const tl = fmtTime(this.indexToTime(fi), this.intervalMs, true);
       ctx.font = '11px system-ui'; const tw = ctx.measureText(tl).width + 14;
       ctx.fillStyle = C.labelBg; ctx.fillRect(x - tw / 2, L.plotH + 1, tw, TIME_H - 2);
-      ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tl, x, L.plotH + TIME_H / 2);
+      ctx.fillStyle = C.labelText; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tl, x, L.plotH + TIME_H / 2);
     }
     _drawLegend(L, i1) {
       const ctx = this.ctx, idx = this._hoverIndex() ?? Math.min(i1, this.bars.length - 1);
@@ -702,19 +732,19 @@
       const put = (t, c, gap = 8) => {
         const w = ctx.measureText(t).width;
         if (x > 8 && x + w > maxX) { x = 8; y += 17; }
-        ctx.fillStyle = 'rgba(13,17,23,0.72)'; ctx.fillRect(x - 3, y - 2, w + gap, 16);
+        ctx.fillStyle = C.legendBg; ctx.fillRect(x - 3, y - 2, w + gap, 16);
         ctx.fillStyle = c; ctx.fillText(t, x, y); x += w + gap;
       };
       // 多图时格子较小：平时只显示收盘价，鼠标移上来才显示完整数值
       const compact = this.w < 560, hovering = !!this.mouse || this.syncT != null;
       if (!compact || hovering) {
-        put('开', C.axis); put(b.o.toFixed(dec), col);
-        put('高', C.axis); put(b.h.toFixed(dec), col);
-        put('低', C.axis); put(b.l.toFixed(dec), col);
+        put(_t('开'), C.axis); put(b.o.toFixed(dec), col);
+        put(_t('高'), C.axis); put(b.h.toFixed(dec), col);
+        put(_t('低'), C.axis); put(b.l.toFixed(dec), col);
       }
-      put('收', C.axis); put(b.c.toFixed(dec), col);
+      put(_t('收'), C.axis); put(b.c.toFixed(dec), col);
       put((chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? C.up : C.down);
-      if (!compact || hovering) { put('量', C.axis); put(fmtVol(b.v), C.text); }
+      if (!compact || hovering) { put(_t('量'), C.axis); put(fmtVol(b.v), C.text); }
       if (compact && !hovering) return;
       // 叠加指标数值
       x = 8; y += 18; ctx.font = '11px ui-monospace, Menlo, monospace';
@@ -722,7 +752,7 @@
         const v = c.al[idx], v0 = c.al[c.b0], m0 = this.bars[c.b0].c;
         if (v == null || !v0) continue;
         const pc = (v / v0 - 1) * 100, pm = (this.bars[idx].c / m0 - 1) * 100;
-        put(`${c.label} ${pc >= 0 ? '+' : ''}${pc.toFixed(2)}%（本品种 ${pm >= 0 ? '+' : ''}${pm.toFixed(2)}%）`, c.color, 10);
+        put(_t("{0} {1}{2}%（本品种 {3}{4}%）", [c.label, pc >= 0 ? '+' : '', pc.toFixed(2), pm >= 0 ? '+' : '', pm.toFixed(2)]), c.color, 10);
       }
       for (const o of this._overlays()) {
         const lines = o.out.lines;
@@ -752,7 +782,7 @@
           ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           const lines = String(d.text || '').split('\n');
           const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + 12, h = lines.length * 17 + 6;
-          ctx.fillStyle = sel ? 'rgba(255,181,71,0.25)' : 'rgba(22,29,41,0.88)';
+          ctx.fillStyle = sel ? 'rgba(255,181,71,0.25)' : C.noteBg;
           ctx.fillRect(a.x, a.y - h / 2, w, h);
           ctx.strokeRect(a.x + 0.5, a.y - h / 2 + 0.5, w, h);
           ctx.fillStyle = d.color || C.draw;
@@ -803,7 +833,7 @@
             ctx.strokeStyle = `rgba(${col},0.9)`; line({ x: a.x, y: a.y }, { x: a.x, y: b.y }); line({ x: a.x, y: b.y }, b);
             const dp = d.p2.p - d.p1.p, pct = (dp / d.p1.p) * 100;
             const nb = Math.round(this.timeToIndex(d.p2.t) - this.timeToIndex(d.p1.t));
-            const txt = [`${dp >= 0 ? '+' : ''}${dp.toFixed(decimalsFor(d.p1.p))}（${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%）`, `${Math.abs(nb)} 根K线 · ${fmtSpan(Math.abs(d.p2.t - d.p1.t))}`];
+            const txt = [`${dp >= 0 ? '+' : ''}${dp.toFixed(decimalsFor(d.p1.p))}${P.paren(`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`)}`, _t("{0} 根K线 · {1}", [Math.abs(nb), fmtSpan(Math.abs(d.p2.t - d.p1.t))])];
             ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             const tw = Math.max(...txt.map((t) => ctx.measureText(t).width)) + 14, lx = (a.x + b.x) / 2, ly = up ? y0 - 24 : y0 + h + 24;
             ctx.fillStyle = `rgba(${col},0.92)`; ctx.fillRect(lx - tw / 2, ly - 18, tw, 36);
@@ -1022,5 +1052,5 @@
   }
 
   global.CandleChart = Chart;
-  global.ChartUtil = { decimalsFor, fmtVol, fmtNum };
+  global.ChartUtil = { decimalsFor, fmtVol, fmtNum, setTheme };
 })(window);

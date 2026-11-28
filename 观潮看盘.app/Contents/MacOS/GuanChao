@@ -5,7 +5,7 @@ APP="$(cd "$(dirname "$0")/../.." && pwd)"
 DIR="$(dirname "$APP")"
 [ -f "$DIR/index.html" ] || DIR="$HOME/CLAUDE/观潮看盘"
 if [ ! -f "$DIR/index.html" ]; then
-  /usr/bin/osascript -e 'display alert "找不到观潮看盘的程序文件" message "请把 观潮看盘.app 放回程序文件夹里，和 index.html 放在一起。"' >/dev/null 2>&1
+  /usr/bin/osascript -e 'display alert "找不到观潮看盘的程序文件" message "请把 观潮看盘.app 放回 观潮看盘 文件夹里，或者确认文件夹在 ~/CLAUDE/观潮看盘。"' >/dev/null 2>&1
   exit 1
 fi
 ENC="$(printf '%s' "$DIR/index.html" | /usr/bin/perl -pe 's/([^A-Za-z0-9\/._~-])/sprintf("%%%02X", ord($1))/ge')"

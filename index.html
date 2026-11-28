@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>观潮看盘</title>
 <link rel="stylesheet" href="style.css">
+<script src="js/lang-en.js"></script>
+<script src="js/prefs.js"></script>
 </head>
 <body>
 <header class="top">
@@ -41,6 +43,8 @@
   <button class="btn toggle" id="ext-btn" title="美股：K线是否包含盘前盘后（04:00–09:30、16:00–20:00 美东时间）的成交。关闭时只显示常规交易时段（多数看盘软件的默认做法）">盘前盘后</button>
   <div class="spacer"></div>
   <div class="status" id="status"><i></i><span>连接中</span></div>
+  <button class="btn" id="theme-btn"></button>
+  <button class="btn" id="lang-btn" title="切换为 English">EN</button>
   <button class="btn" id="settings-btn" title="设置：美股 API Key、财报 Key">⚙</button>
 </header>
 
@@ -134,8 +138,8 @@
     <label><input type="checkbox" id="sc-up" checked>今日涨幅 ≥ <input id="sc-up-v" type="number" value="3" step="0.5">%</label>
     <label><input type="checkbox" id="sc-dn">今日跌幅 ≥ <input id="sc-dn-v" type="number" value="3" step="0.5">%</label>
     <label><input type="checkbox" id="sc-vol">放量：成交量 ≥ <input id="sc-vol-v" type="number" value="2" step="0.1"> 倍 20 日均量</label>
-    <label><input type="checkbox" id="sc-above">收盘价在 MA<input id="sc-above-v" type="number" value="50"> 之上</label>
-    <label><input type="checkbox" id="sc-below">收盘价在 MA<input id="sc-below-v" type="number" value="50"> 之下</label>
+    <label><input type="checkbox" id="sc-above">收盘价站上 MA<input id="sc-above-v" type="number" value="50"></label>
+    <label><input type="checkbox" id="sc-below">收盘价跌破 MA<input id="sc-below-v" type="number" value="50"></label>
     <label><input type="checkbox" id="sc-cross">最近 <input id="sc-cross-d" type="number" value="3"> 天内向上突破 MA<input id="sc-cross-v" type="number" value="20"></label>
     <label><input type="checkbox" id="sc-high">创 <input id="sc-high-v" type="number" value="20"> 日新高</label>
     <label><input type="checkbox" id="sc-low">创 <input id="sc-low-v" type="number" value="20"> 日新低</label>

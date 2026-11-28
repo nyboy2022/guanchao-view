@@ -36,6 +36,8 @@
 
 **右键菜单**：在K线图上右键，可以直接在这个价位设警报、画线、加标记、切换周期等。
 
+**界面**：深色 / 浅色 / 跟随系统三种主题（右上角 ◐ 按钮），中文 / English 两种语言（右上角 EN 按钮）。
+
 **快捷键**：直接打字输入代码换股票，方向键平移缩放，`,` `.` 切换周期，Alt+字母选画线工具。按 `?` 查看全部快捷键。
 
 | 右键菜单 | 画线菜单 |
@@ -97,6 +99,8 @@ Alpaca 免费版的限制：
 ```
 index.html          页面结构
 style.css           样式
+js/prefs.js         界面语言（中文 / English）和明暗主题
+js/lang-en.js       英文界面文字（以中文原文为键）
 js/chart.js         K线图引擎（Canvas 绘制、画线、交互、联动）
 js/indicators.js    技术指标计算
 js/feed.js          数据源（OKX、Alpaca、Tradier、Alpha Vantage、演示数据），统一接口

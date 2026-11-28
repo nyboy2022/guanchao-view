@@ -198,20 +198,20 @@
   // params：可调参数；kind：overlay 画在主图 / pane 单独副图
   const P = (key, label, def, min, max, step) => ({ key, label, def, min, max, step });
   const TYPES = {
-    ma:   { name: 'MA 均线',         kind: 'overlay', params: [P('n', '周期', 20, 1, 1000)], color: '#f5c451' },
-    ema:  { name: 'EMA 指数均线',    kind: 'overlay', params: [P('n', '周期', 12, 1, 1000)], color: '#ff8f5a' },
-    wma:  { name: 'WMA 加权均线',    kind: 'overlay', params: [P('n', '周期', 20, 1, 500)], color: '#4fd1c5' },
-    boll: { name: 'BOLL 布林带',     kind: 'overlay', params: [P('n', '周期', 20, 2, 500), P('k', '倍数', 2, 0.1, 10, 0.1)], color: '#e0a3ff' },
-    vwap: { name: 'VWAP 成交量加权均价', kind: 'overlay', params: [], color: '#ff6fae' },
-    sar:  { name: 'SAR 抛物线',      kind: 'overlay', params: [P('step', '步长', 0.02, 0.001, 0.5, 0.001), P('max', '上限', 0.2, 0.01, 1, 0.01)], color: '#9ad16b' },
-    vol:  { name: 'VOL 成交量',      kind: 'pane', params: [P('n1', '均线1', 5, 1, 500), P('n2', '均线2', 10, 1, 500)], color: '#f5c451' },
-    rsi:  { name: 'RSI',             kind: 'pane', params: [P('n', '周期', 14, 2, 500), P('hi', '超买', 70, 50, 100), P('lo', '超卖', 30, 0, 50)], color: '#c58cff' },
-    macd: { name: 'MACD',            kind: 'pane', params: [P('fast', '快线', 12, 1, 500), P('slow', '慢线', 26, 2, 500), P('signal', '信号', 9, 1, 500)], color: '#5ab0ff' },
-    kdj:  { name: 'KDJ 随机指标',    kind: 'pane', params: [P('n', '周期', 9, 2, 500), P('m1', 'K平滑', 3, 1, 50), P('m2', 'D平滑', 3, 1, 50)], color: '#f5c451' },
-    atr:  { name: 'ATR 真实波幅',    kind: 'pane', params: [P('n', '周期', 14, 1, 500)], color: '#ff8f5a' },
-    obv:  { name: 'OBV 能量潮',      kind: 'pane', params: [P('n', '均线', 20, 1, 500)], color: '#4fd1c5' },
-    cci:  { name: 'CCI 顺势指标',    kind: 'pane', params: [P('n', '周期', 20, 2, 500)], color: '#5ab0ff' },
-    wr:   { name: 'WR 威廉指标',     kind: 'pane', params: [P('n', '周期', 14, 2, 500)], color: '#e0a3ff' },
+    ma:   { name: _t('MA 均线'),         kind: 'overlay', params: [P('n', _t('周期'), 20, 1, 1000)], color: '#f5c451' },
+    ema:  { name: _t('EMA 指数均线'),    kind: 'overlay', params: [P('n', _t('周期'), 12, 1, 1000)], color: '#ff8f5a' },
+    wma:  { name: _t('WMA 加权均线'),    kind: 'overlay', params: [P('n', _t('周期'), 20, 1, 500)], color: '#4fd1c5' },
+    boll: { name: _t('BOLL 布林带'),     kind: 'overlay', params: [P('n', _t('周期'), 20, 2, 500), P('k', _t('倍数'), 2, 0.1, 10, 0.1)], color: '#e0a3ff' },
+    vwap: { name: _t('VWAP 成交量加权均价'), kind: 'overlay', params: [], color: '#ff6fae' },
+    sar:  { name: _t('SAR 抛物线'),      kind: 'overlay', params: [P('step', _t('步长'), 0.02, 0.001, 0.5, 0.001), P('max', _t('上限'), 0.2, 0.01, 1, 0.01)], color: '#9ad16b' },
+    vol:  { name: _t('VOL 成交量'),      kind: 'pane', params: [P('n1', _t('均线1'), 5, 1, 500), P('n2', _t('均线2'), 10, 1, 500)], color: '#f5c451' },
+    rsi:  { name: 'RSI',             kind: 'pane', params: [P('n', _t('周期'), 14, 2, 500), P('hi', _t('超买'), 70, 50, 100), P('lo', _t('超卖'), 30, 0, 50)], color: '#c58cff' },
+    macd: { name: 'MACD',            kind: 'pane', params: [P('fast', _t('快线'), 12, 1, 500), P('slow', _t('慢线'), 26, 2, 500), P('signal', _t('信号'), 9, 1, 500)], color: '#5ab0ff' },
+    kdj:  { name: _t('KDJ 随机指标'),    kind: 'pane', params: [P('n', _t('周期'), 9, 2, 500), P('m1', _t('K平滑'), 3, 1, 50), P('m2', _t('D平滑'), 3, 1, 50)], color: '#f5c451' },
+    atr:  { name: _t('ATR 真实波幅'),    kind: 'pane', params: [P('n', _t('周期'), 14, 1, 500)], color: '#ff8f5a' },
+    obv:  { name: _t('OBV 能量潮'),      kind: 'pane', params: [P('n', _t('均线'), 20, 1, 500)], color: '#4fd1c5' },
+    cci:  { name: _t('CCI 顺势指标'),    kind: 'pane', params: [P('n', _t('周期'), 20, 2, 500)], color: '#5ab0ff' },
+    wr:   { name: _t('WR 威廉指标'),     kind: 'pane', params: [P('n', _t('周期'), 14, 2, 500)], color: '#e0a3ff' },
   };
   const PALETTE = ['#f5c451', '#5ab0ff', '#c58cff', '#ff8f5a', '#4fd1c5', '#e0a3ff', '#9ad16b', '#ff6fae'];
   const SECOND = '#ff8f5a', THIRD = '#c58cff';

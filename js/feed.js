@@ -16,7 +16,7 @@
   async function getJSON(url, headers) {
     let r;
     try { r = await fetch(url, { headers }); }
-    catch (e) { throw new FeedError('网络连接失败', 'network'); }
+    catch (e) { throw new FeedError(_t('网络连接失败'), 'network'); }
     if (r.status === 401 || r.status === 403) throw new FeedError('HTTP ' + r.status, 'auth');
     if (!r.ok) throw new FeedError('HTTP ' + r.status, 'other');
     return r.json();
@@ -65,7 +65,7 @@
 
   const OkxFeed = {
     id: 'okx', market: 'crypto',
-    label: 'OKX 现货公开行情 · WebSocket 实时推送',
+    label: _t('OKX 现货公开行情 · WebSocket 实时推送'),
     defaults: { symbol: 'BTC-USDT', watchlist: ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT', 'DOGE-USDT'] },
     normalizeSymbol(s) {
       s = s.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
@@ -79,7 +79,7 @@
       let all = [];
       if (!endTime) {
         const j = await getJSON(`${OKX_REST}/candles?instId=${symbol}&bar=${bar}&limit=300`);
-        if (j.code !== '0') throw new FeedError(j.msg || 'OKX 错误', 'other');
+        if (j.code !== '0') throw new FeedError(j.msg || _t('OKX 错误'), 'other');
         all = j.data.map(okxBar);
         endTime = all.length ? all[all.length - 1].t : Date.now();
       }
@@ -119,7 +119,6 @@
       return out;
     },
     async validateSymbol(symbol) {
-      if (useTr()) { try { return !!(await trQuotes([symbol]))[symbol]; } catch (_) { return false; } }
       try { const j = await getJSON(`${OKX_REST}/ticker?instId=${symbol}`); return j.code === '0' && j.data.length > 0; }
       catch (_) { return false; }
     },
@@ -271,18 +270,18 @@
     try { const c = JSON.parse(localStorage.getItem(ck) || 'null'); if (c && Date.now() - c.at < 3 * 86400e3) return c.ev; } catch (_) {}
     let j;
     try { j = await getJSON(`https://www.alphavantage.co/query?function=EARNINGS&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`); }
-    catch (e) { throw new Error(e.kind === 'network' ? '连不上 Alpha Vantage' : e.message); }
+    catch (e) { throw new Error(e.kind === 'network' ? _t('连不上 Alpha Vantage') : e.message); }
     const info = j.Information || j.Note;
-    if (info) throw new Error(/rate limit|25 requests|frequency|per day/i.test(info) ? '今天的免费次数（25 次）用完了，明天会恢复' : 'Key 无效或被拒绝');
-    if (j['Error Message']) throw new Error('Alpha Vantage 没有这个代码的财报');
+    if (info) throw new Error(/rate limit|25 requests|frequency|per day/i.test(info) ? _t('今天的免费次数（25 次）用完了，明天会恢复') : _t('Key 无效或被拒绝'));
+    if (j['Error Message']) throw new Error(_t('Alpha Vantage 没有这个代码的财报'));
     const day = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d, 14, 30); };
     const num = (v) => (v == null || v === 'None' || v === '' ? null : +v);
     const ev = (j.quarterlyEarnings || []).filter((q) => q.reportedDate).map((q) => {
       const a = num(q.reportedEPS), e = num(q.estimatedEPS), sp = num(q.surprisePercentage);
       const beat = a != null && e != null ? (a >= e ? 'beat' : 'miss') : null;
-      const when = q.reportTime === 'pre-market' ? ' 盘前' : q.reportTime === 'post-market' ? ' 盘后' : '';
-      return { t: day(q.reportedDate), kind: 'earn', title: '财报', beat,
-        detail: `${q.reportedDate}${when} · 财季 ${q.fiscalDateEnding} · EPS ${a ?? '—'}（预期 ${e ?? '—'}${sp != null ? `，${sp >= 0 ? '超出' : '低于'} ${Math.abs(sp).toFixed(1)}%` : ''}）` };
+      const when = q.reportTime === 'pre-market' ? _t(' 盘前') : q.reportTime === 'post-market' ? _t(' 盘后') : '';
+      return { t: day(q.reportedDate), kind: 'earn', title: _t('财报'), beat,
+        detail: _t("{0}{1} · 财季 {2} · EPS {3}（预期 {4}{5}）", [q.reportedDate, when, q.fiscalDateEnding, a ?? '—', e ?? '—', sp != null ? `，${sp >= 0 ? _t('超出') : _t('低于')} ${Math.abs(sp).toFixed(1)}%` : '']) };
     });
     try { localStorage.setItem(ck, JSON.stringify({ at: Date.now(), ev })); } catch (_) {}
     return ev;
@@ -449,9 +448,9 @@
   const AlpacaFeed = {
     id: 'alpaca', market: 'us',
     get label() {
-      if (useTr()) return this.hasAlp() ? 'Tradier 全市场实时 + Alpaca 历史K线' : 'Tradier 全市场实时';
-      return alpCfg.feed === 'sip' ? 'Alpaca · 全美市场 SIP 实时'
-        : 'Alpaca 免费版 · 历史K线用全市场数据（延迟15分钟以上的部分），最近15分钟和实时推送来自 IEX';
+      if (useTr()) return this.hasAlp() ? _t('Tradier 全市场实时 + Alpaca 历史K线') : _t('Tradier 全市场实时');
+      return alpCfg.feed === 'sip' ? _t('Alpaca · 全美市场 SIP 实时')
+        : _t('Alpaca 免费版 · 历史K线用全市场数据（延迟15分钟以上的部分），最近15分钟和实时推送来自 IEX');
     },
     defaults: { symbol: 'AAPL', watchlist: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'SPY', 'QQQ'] },
     configure(cfg) {
@@ -471,10 +470,10 @@
       const old = trCfg.token; trCfg.token = token;
       try {
         const q = (await trQuotes(['AAPL'])).AAPL;
-        if (!q) return { ok: false, msg: '连上了，但没拿到报价' };
+        if (!q) return { ok: false, msg: _t('连上了，但没拿到报价') };
         let n = 0; try { n = (await trTimesales('AAPL', '1min', Date.now() - 4 * 86400e3, Date.now(), true)).length; } catch (_) {}
         return { ok: true, last: +q.last, t: +q.trade_date || 0, bars: n };
-      } catch (e) { return { ok: false, msg: e.kind === 'auth' ? 'Token 被拒绝（要用正式环境 Production 的 Token）' : e.kind === 'network' ? '连不上 Tradier' : e.message }; }
+      } catch (e) { return { ok: false, msg: e.kind === 'auth' ? _t('Token 被拒绝（要用正式环境 Production 的 Token）') : e.kind === 'network' ? _t('连不上 Tradier') : e.message }; }
       finally { trCfg.token = old; }
     },
     hasAlp() { return !!(alpCfg.key && alpCfg.secret); },
@@ -491,7 +490,7 @@
     resume() { for (const st of [alpStream, trStream]) { if (!st.paused) continue; st.paused = false; st.sync(); } },
     normalizeSymbol(s) { return s.trim().toUpperCase().replace(/[^A-Z.]/g, ''); },
     async loadHistory(symbol, interval, endTime) {
-      if (!this.hasKey()) throw new FeedError('未设置 API Key', 'auth');
+      if (!this.hasKey()) throw new FeedError(_t('未设置 API Key'), 'auth');
       const ms = INTERVAL_MS[interval];
       const now = Date.now();
       const end = endTime || now;
@@ -690,8 +689,8 @@
           } catch (e) { if (e.kind === 'auth') nightOk = false; }
         }
         const gotNight = Object.values(out.quotes).some((q) => q.session === 'night');
-        if (useTr() && !gotNight) out.nightNote = '夜盘（20:00–次日 04:00）：Tradier 现在没有夜盘成交数据，Alpaca 免费版也没有，这里显示的是盘后最后价格。';
-        else if (!gotNight && (nightOk === false || !this.hasAlp())) out.nightNote = '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。';
+        if (useTr() && !gotNight) out.nightNote = _t('夜盘（20:00–次日 04:00）：Tradier 现在没有夜盘成交数据，Alpaca 免费版也没有，这里显示的是盘后最后价格。');
+        else if (!gotNight && (nightOk === false || !this.hasAlp())) out.nightNote = _t('夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。');
       }
       return out;
     },
@@ -709,21 +708,21 @@
             if (token) q.set('page_token', token);
             const j = await getJSON(`https://data.alpaca.markets/v1/corporate-actions?${q}`, alpHeaders());
             const ca = j.corporate_actions || {};
-            for (const d of ca.cash_dividends || []) if (d.ex_date) ev.push({ t: day(d.ex_date), kind: 'div', title: '分红', detail: `除息日 ${d.ex_date} · 每股 $${+(+d.rate).toFixed(4)}${d.special ? '（特别股息）' : ''}${d.payable_date ? ' · 派息日 ' + d.payable_date : ''}` });
-            for (const d of [...(ca.forward_splits || []), ...(ca.reverse_splits || [])]) if (d.ex_date) ev.push({ t: day(d.ex_date), kind: 'split', title: '拆股', detail: `${d.ex_date} · ${+d.old_rate} 股变 ${+d.new_rate} 股${+d.new_rate < +d.old_rate ? '（合股）' : ''}` });
+            for (const d of ca.cash_dividends || []) if (d.ex_date) ev.push({ t: day(d.ex_date), kind: 'div', title: _t('分红'), detail: _t("除息日 {0} · 每股 ${1}{2}{3}", [d.ex_date, +(+d.rate).toFixed(4), d.special ? _t('（特别股息）') : '', d.payable_date ? _t(' · 派息日 ') + d.payable_date : '']) });
+            for (const d of [...(ca.forward_splits || []), ...(ca.reverse_splits || [])]) if (d.ex_date) ev.push({ t: day(d.ex_date), kind: 'split', title: _t('拆股'), detail: _t("{0} · {1} 股变 {2} 股{3}", [d.ex_date, +d.old_rate, +d.new_rate, +d.new_rate < +d.old_rate ? _t('（合股）') : '']) });
             token = j.next_page_token;
           } while (token && ++pages < 10);
-        } catch (e) { notes.push('分红/拆股数据读取失败：' + (e.kind === 'auth' ? 'Alpaca 账号没有这项数据的权限' : e.message)); }
+        } catch (e) { notes.push(_t('分红/拆股数据读取失败：') + (e.kind === 'auth' ? _t('Alpaca 账号没有这项数据的权限') : e.message)); }
       }
       if (avKey) {
         try { ev.push(...await avEarnings(symbol, avKey)); }
-        catch (e) { notes.push('财报日读取失败：' + e.message); }
-      } else notes.push('财报日需要在 ⚙ 设置里填一个 Alpha Vantage 免费 Key');
+        catch (e) { notes.push(_t('财报日读取失败：') + e.message); }
+      } else notes.push(_t('财报日需要在 ⚙ 设置里填一个 Alpha Vantage 免费 Key'));
       return { events: ev.filter((x) => x.t >= startMs).sort((a, b) => a.t - b.t), notes };
     },
     // 筛选器用：多个品种的日线，一次请求（自动翻页）
     async dailyBars(symbols, n) {
-      if (!this.hasKey()) throw new FeedError('未设置 API Key', 'auth');
+      if (!this.hasKey()) throw new FeedError(_t('未设置 API Key'), 'auth');
       if (!this.hasAlp()) { // 只有 Tradier：逐个品种查日线
         const out = {}, now = Date.now();
         for (const s of symbols) { try { out[s] = await trHistory(s, '1d', now - n * 1.5 * 86400e3, now); } catch (e) { if (e.kind === 'auth') throw e; } }
@@ -743,6 +742,7 @@
       return out;
     },
     async validateSymbol(symbol) {
+      if (useTr()) { try { return !!(await trQuotes([symbol]))[symbol]; } catch (_) { return false; } }
       try { await getJSON(`${ALP_REST}/${encodeURIComponent(symbol)}/snapshot?feed=${alpCfg.feed}`, alpHeaders()); return true; }
       catch (_) { return false; }
     },
@@ -808,7 +808,7 @@
   }
   function makeSim(base) {
     return {
-      id: 'sim', market: base.market, label: '演示数据（随机生成，非真实行情）', defaults: base.defaults,
+      id: 'sim', market: base.market, label: _t('演示数据（随机生成，非真实行情）'), defaults: base.defaults,
       normalizeSymbol: base.normalizeSymbol.bind(base),
       chartDelayed() { return base.market === 'us' && typeof window !== 'undefined' && !!window.__simDelayed; },
       async loadHistory(symbol, interval, endTime) {
@@ -825,17 +825,17 @@
         if (base.market !== 'us') return { session: 'rth', quotes: {} };
         const session = typeof window !== 'undefined' && window.__simSession || 'post', quotes = {};
         for (const s of symbols) { const ref = seedPrice(s); quotes[s] = { session, price: ref * (1 + (s.length % 3 - 1) * 0.004), t: Date.now(), ref, delayed: !!window.__simDelayed && session !== 'night' }; }
-        return { session, quotes, nightNote: session === 'night' ? '夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。' : '' };
+        return { session, quotes, nightNote: session === 'night' ? _t('夜盘（20:00–次日 04:00）价格：Alpaca 免费版没有这项数据，这里显示的是盘后最后价格。') : '' };
       },
       async events(symbol, startMs) {
         if (base.market !== 'us') return { events: [], notes: [] };
         const ev = [], now = Date.now(), q = 91.3 * 86400e3, D = 86400e3;
         for (let k = 1; k < 40; k++) {
           const t = Math.floor((now - k * q + 20 * D) / D) * D + 14.5 * 3600e3;
-          ev.push({ t, kind: 'earn', title: '财报', beat: k % 3 ? 'beat' : 'miss', detail: '演示数据' });
-          ev.push({ t: t + 30 * D, kind: 'div', title: '分红', detail: '演示数据 · 每股 $0.25' });
+          ev.push({ t, kind: 'earn', title: _t('财报'), beat: k % 3 ? 'beat' : 'miss', detail: _t('演示数据') });
+          ev.push({ t: t + 30 * D, kind: 'div', title: _t('分红'), detail: _t('演示数据 · 每股 $0.25') });
         }
-        ev.push({ t: Math.floor((now - 700 * D) / D) * D + 14.5 * 3600e3, kind: 'split', title: '拆股', detail: '演示数据 · 1 股变 4 股' });
+        ev.push({ t: Math.floor((now - 700 * D) / D) * D + 14.5 * 3600e3, kind: 'split', title: _t('拆股'), detail: _t('演示数据 · 1 股变 4 股') });
         return { events: ev.filter((x) => x.t >= startMs && x.t <= now).sort((a, b) => a.t - b.t), notes: [] };
       },
       subscribeKline(symbol, interval, onBar, onStatus) {
